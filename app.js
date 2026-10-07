@@ -2,8 +2,10 @@
   "use strict";
 
   const DAILY_LIMIT = 15;
+  const COOLDOWN_MS = 10000;
   const API_BASE = "https://telegram-webhook-production-aa93.up.railway.app";
   const STORAGE_KEY = "young-money-space-videos-v1";
+  const COOLDOWN_KEY = "young-money-ad-cooldown-v1";
   const button = document.getElementById("watch-button");
   const buttonLabel = document.getElementById("button-state-label");
   const countVisible = document.getElementById("count-visible");
@@ -13,6 +15,12 @@
   let inFlight = false;
   let noticeTimer;
   let memoryState = null;
+  let cooldownUntil = 0;
+  let cooldownTimer;
+  try {
+    const saved = Number(localStorage.getItem(COOLDOWN_KEY));
+    if (Number.isFinite(saved)) cooldownUntil = Math.min(saved, Date.now() + COOLDOWN_MS);
+  } catch { /* Use the in-memory timer when storage is unavailable. */ }
 
   // The visual daily progress is local; Monetag postbacks are recorded separately
   // after the Telegram identity is validated on our server.
@@ -36,6 +44,31 @@
     memoryState = state;
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
     catch { /* The UI continues in memory if storage is unavailable. */ }
+  }
+
+  function secondsRemaining() {
+    return Math.max(0, Math.ceil((cooldownUntil - Date.now()) / 1000));
+  }
+
+  function scheduleCooldownTimer() {
+    if (!cooldownTimer) {
+      cooldownTimer = setInterval(() => {
+        render();
+        if (!secondsRemaining()) {
+          clearInterval(cooldownTimer);
+          cooldownTimer = null;
+        }
+      }, 250);
+    }
+  }
+
+  function startCooldown(seconds = 10) {
+    const duration = Math.min(COOLDOWN_MS, Math.max(0, Math.ceil((Number(seconds) || 10) * 1000)));
+    cooldownUntil = Math.max(cooldownUntil, Date.now() + duration);
+    try { localStorage.setItem(COOLDOWN_KEY, String(cooldownUntil)); }
+    catch { /* The in-memory timer still prevents repeated taps. */ }
+    scheduleCooldownTimer();
+    render();
   }
 
   function render() {
@@ -63,6 +96,12 @@
       button.dataset.state = "limit";
       buttonLabel.textContent = "Volte amanhã";
       button.setAttribute("aria-label", "Limite diário atingido. Volte amanhã.");
+    } else if (secondsRemaining()) {
+      const seconds = secondsRemaining();
+      button.disabled = true;
+      button.dataset.state = "cooldown";
+      buttonLabel.textContent = `Aguarde ${seconds}s`;
+      button.setAttribute("aria-label", `Próximo anúncio disponível em ${seconds} segundos.`);
     } else {
       button.disabled = false;
       button.dataset.state = "ready";
@@ -86,6 +125,11 @@
       headers: { "x-telegram-init-data": initData },
       cache: "no-store"
     });
+    if (response.status === 429) {
+      const { retryAfterSeconds } = await response.json();
+      startCooldown(retryAfterSeconds);
+      return null;
+    }
     if (!response.ok) throw new Error("Could not prepare ad");
     const { ymid } = await response.json();
     if (!/^[a-f0-9-]{36}$/i.test(ymid)) throw new Error("Invalid ad identifier");
@@ -93,7 +137,7 @@
   }
 
   button.addEventListener("click", async () => {
-    if (inFlight) return;
+    if (inFlight || secondsRemaining()) return;
     const state = readState();
     if (state.count >= DAILY_LIMIT) { render(); return; }
 
@@ -108,7 +152,9 @@
     let adStarted = false;
     try {
       const ymid = await prepareAd();
+      if (!ymid) return;
       adStarted = true;
+      startCooldown(10);
       await showAd({ type: "end", ymid, requestVar: "daily_video" }); // Zone 11977205.
       const latest = readState();
       if (latest.count < DAILY_LIMIT) {
@@ -119,6 +165,7 @@
     } catch {
       showNotice(adStarted ? "O vídeo não foi concluído. Tente novamente." : "Abra pelo bot no Telegram e tente novamente.", "error");
     } finally {
+      if (adStarted) startCooldown(10);
       inFlight = false;
       render();
     }
@@ -144,5 +191,6 @@
   } catch { /* Also works as a normal mobile site. */ }
 
   render();
+  if (secondsRemaining()) scheduleCooldownTimer();
   scheduleMidnightReset();
 })();
