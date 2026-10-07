@@ -198,7 +198,7 @@ function makeMessage(update, webAppUrl, ledger) {
     const counts = ledger.counts(userId);
     return {
       chat_id: message.chat.id,
-      text: `Impressões confirmadas pela Monetag (UTC):\nHoje: ${counts.todayTotal} (${counts.todayValued} monetizadas)\nTotal: ${counts.total} (${counts.valued} monetizadas)\n\nUma impressão começa quando o anúncio aparece; não significa vídeo concluído, saldo ou saque.`
+      text: `Impressões confirmadas pela Monetag (Brasília):\nHoje: ${counts.todayTotal} (${counts.todayValued} monetizadas)\nTotal: ${counts.total} (${counts.valued} monetizadas)\n\nUma impressão começa quando o anúncio aparece; não significa vídeo concluído, saldo ou saque.`
     };
   }
   if (command === "privacidade") {
@@ -207,7 +207,7 @@ function makeMessage(update, webAppUrl, ledger) {
   if (command === "ajuda") {
     return {
       chat_id: message.chat.id,
-      text: "Toque em Abrir Mini App para assistir aos anúncios disponíveis. O limite visual é de 15 vídeos por dia neste dispositivo. Use /status para consultar as impressões confirmadas pela Monetag. Impressões não representam saldo, pontos ou saque.",
+      text: "Toque em Abrir Mini App para acompanhar até 15 impressões confirmadas por dia na sua conta Telegram. A contagem reinicia à meia-noite de Brasília. Use /status para consultar o histórico. Impressões não representam saldo, pontos ou saque.",
       reply_markup: { inline_keyboard: [[{ text: "🚀 Abrir Mini App", web_app: { url: webAppUrl } }], [{ text: "Privacidade", url: privacyUrl }]] }
     };
   }
@@ -218,7 +218,7 @@ function makeMessage(update, webAppUrl, ledger) {
   };
 }
 
-async function createServer({ botToken, webhookSecret, postbackSecret, adminSecret, webAppUrl, dataDir, sendMessage, answerCallback, setChatMenu, getTelegramChat, getTelegramPhoto }) {
+async function createServer({ botToken, webhookSecret, postbackSecret, adminSecret, webAppUrl, dataDir, sendMessage, answerCallback, setChatMenu, getTelegramChat, getTelegramPhoto, getYoungMoneyAccount }) {
   if (!botToken || !/^[A-Za-z0-9_-]{16,256}$/.test(webhookSecret || "") ||
       !/^[A-Za-z0-9_-]{32,256}$/.test(postbackSecret || "")) {
     throw new Error("BOT_TOKEN, WEBHOOK_SECRET and MONETAG_POSTBACK_SECRET must be configured");
@@ -233,6 +233,21 @@ async function createServer({ botToken, webhookSecret, postbackSecret, adminSecr
   const menuConfiguredForChat = new Set();
   const pendingLinks = new Map();
   const lookupPhoto = getTelegramPhoto || (userId => fetchTelegramPhoto(botToken, userId));
+  const lookupAccount = getYoungMoneyAccount || (async (token, deviceId) => {
+    const base = process.env.YOUNGMONEY_API_URL || "https://youngmoney-api-railway-production-5bf3.up.railway.app";
+    const url = new URL("/api/v1/telegram/identity.php", base);
+    if (url.protocol !== "https:" || url.origin !== new URL(base).origin) throw new Error("Invalid Young Money API URL");
+    const response = await fetch(url, {
+      method: "POST", headers: {
+        authorization: `Bearer ${token}`, "x-youngmoney-device-id": deviceId
+      },
+      signal: AbortSignal.timeout(8000)
+    });
+    if (response.status === 401 || response.status === 403) return null;
+    if (!response.ok) throw new Error(`Young Money identity unavailable (${response.status})`);
+    const payload = await response.json();
+    return payload.status === "success" ? payload.data : null;
+  });
 
   function linkTokenHash(req) {
     const match = /^Bearer ([A-Za-z0-9_-]{43})$/.exec(req.headers.authorization || "");
@@ -310,8 +325,28 @@ async function createServer({ botToken, webhookSecret, postbackSecret, adminSecr
       reply(res, 200, { ok: true });
       return;
     }
-    if (requestUrl.pathname === "/api/app-links" && req.method === "POST") {
+    if ((requestUrl.pathname === "/api/app-links" || requestUrl.pathname === "/api/app-links/v2") &&
+        req.method === "POST") {
       // Only a Telegram callback can bind this opaque token to an account.
+      let account = null;
+      if (requestUrl.pathname === "/api/app-links/v2") {
+        if (req.headers.origin) { reply(res, 403, { ok: false }); return; }
+        const match = /^Bearer ([A-Za-z0-9._~-]{16,4096})$/.exec(req.headers.authorization || "");
+        const deviceId = req.headers["x-youngmoney-device-id"];
+        if (!match) { reply(res, 401, { ok: false }); return; }
+        if (typeof deviceId !== "string" || !/^v4[a-f0-9]{62}$/.test(deviceId)) {
+          reply(res, 403, { ok: false }); return;
+        }
+        try { account = await lookupAccount(match[1], deviceId); }
+        catch (error) {
+          console.error("Young Money identity check failed:", error.message);
+          reply(res, 503, { ok: false }); return;
+        }
+        if (!account || !Number.isSafeInteger(account.id) || account.id <= 0 ||
+            account.deviceHash !== crypto.createHash("sha256").update(deviceId).digest("hex")) {
+          reply(res, 401, { ok: false }); return;
+        }
+      }
       for (const [id, link] of pendingLinks) {
         if (link.expiresAt <= Date.now()) pendingLinks.delete(id);
       }
@@ -320,6 +355,8 @@ async function createServer({ botToken, webhookSecret, postbackSecret, adminSecr
       const token = crypto.randomBytes(32).toString("base64url");
       pendingLinks.set(id, {
         tokenHash: crypto.createHash("sha256").update(token).digest("hex"),
+        accountId: account?.id || null,
+        deviceHash: account?.deviceHash || null,
         expiresAt: Date.now() + 10 * 60000
       });
       reply(res, 201, { token, url: `https://t.me/YoungMoneyOFC_bot?start=link_${id}` });
@@ -330,7 +367,8 @@ async function createServer({ botToken, webhookSecret, postbackSecret, adminSecr
       if (!tokenHash) { reply(res, 401, { ok: false }); return; }
       const userId = ledger.linkedUser(tokenHash);
       if (userId) {
-        reply(res, 200, { state: "linked", ...ledger.dailyVideoProgress(userId) });
+        reply(res, 200, { state: "linked", accountId: ledger.linkAccount(tokenHash),
+          ...ledger.dailyVideoProgress(userId) });
         return;
       }
       const pending = [...pendingLinks.values()].some(
@@ -424,6 +462,10 @@ async function createServer({ botToken, webhookSecret, postbackSecret, adminSecr
           reply(res, 429, { ok: false, retryAfterSeconds: error.retryAfterSeconds });
           return;
         }
+        if (error.status === 409) {
+          reply(res, 409, { ok: false, ...ledger.counts(user.id) });
+          return;
+        }
         console.error("Ad ledger failed:", error.message);
         reply(res, 503, { ok: false });
         return;
@@ -480,17 +522,25 @@ async function createServer({ botToken, webhookSecret, postbackSecret, adminSecr
           callback.message.chat.id === userId && Number.isSafeInteger(userId) && userId > 0;
         const link = isPrivate && match ? pendingLinks.get(match[1]) : null;
         const active = link && link.expiresAt > Date.now();
+        let linked = false;
+        let conflict = false;
         if (active) {
-          await ledger.linkApp(link.tokenHash, String(userId));
+          try {
+            linked = await ledger.linkApp(link.tokenHash, String(userId), link.accountId, link.deviceHash);
+          } catch (error) {
+            if (error.status !== 409) throw error;
+            conflict = true;
+          }
           pendingLinks.delete(match[1]);
-          await ledger.saveProfile(String(userId), profileFromTelegram(callback.from));
+          if (linked) await ledger.saveProfile(String(userId), profileFromTelegram(callback.from));
         }
         await acknowledge({
           callback_query_id: callback.id,
-          text: active ? "Conta vinculada. Volte ao aplicativo Young Money." : "Vínculo expirado. Abra o aplicativo para gerar outro.",
-          show_alert: !active
+          text: conflict ? "Esta conta Young Money ou Telegram já está vinculada a outra conta. Fale com o suporte." :
+            linked ? "Conta vinculada. Volte ao aplicativo Young Money." : "Vínculo expirado. Abra o aplicativo para gerar outro.",
+          show_alert: !linked
         });
-        if (active) await send({ chat_id: userId, text: `${displayName(callback.from)}, sua conta Telegram foi vinculada ao card Mini App. O card mostra os vídeos de hoje e não dá pontos. Abra a Mini App para assistir aos vídeos.`, reply_markup: { inline_keyboard: [[{ text: "🚀 Abrir Mini App", web_app: { url: appUrl } }]] } });
+        if (linked) await send({ chat_id: userId, text: `${displayName(callback.from)}, sua conta Telegram foi vinculada ao card Mini App. O card mostra os vídeos de hoje e não dá pontos. Abra a Mini App para assistir aos vídeos.`, reply_markup: { inline_keyboard: [[{ text: "🚀 Abrir Mini App", web_app: { url: appUrl } }]] } });
         reply(res, 200, { ok: true });
         return;
       }
@@ -513,7 +563,7 @@ async function createServer({ botToken, webhookSecret, postbackSecret, adminSecr
         if (link && link.expiresAt > Date.now()) {
           await send({
             chat_id: from.id,
-            text: `Conta Telegram: ${displayName(from)}. Vincular seu progresso dos vídeos ao aplicativo Young Money neste dispositivo? O card mostrará sua contagem diária de até 15 vídeos. Essa ação não concede pontos.`,
+            text: `Conta Telegram: ${displayName(from)}. Vincular seu progresso à conta Young Money${link.accountId ? ` #${link.accountId}` : ""}? A contagem diária de impressões confirmadas ficará no servidor. Essa ação não concede pontos.`,
             reply_markup: { inline_keyboard: [[{ text: "Vincular meu progresso", callback_data: `connect:${linkId}` }]] }
           });
         } else {

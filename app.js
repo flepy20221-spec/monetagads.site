@@ -4,7 +4,6 @@
   const DAILY_LIMIT = 15;
   const COOLDOWN_MS = 10000;
   const API_BASE = "https://telegram-webhook-production-aa93.up.railway.app";
-  const STORAGE_KEY = "young-money-space-videos-v1";
   const PENDING_COMPLETIONS_KEY = "young-money-pending-completions-v1";
   const COOLDOWN_KEY = "young-money-ad-cooldown-v1";
   const button = document.getElementById("watch-button");
@@ -13,9 +12,12 @@
   const countA11y = document.getElementById("count-a11y");
   const slots = document.getElementById("completed-slots");
   const notice = document.getElementById("notice");
+  const accountStatus = document.getElementById("account-status");
   let inFlight = false;
   let noticeTimer;
-  let memoryState = null;
+  let progress = null;
+  let resetTimer;
+  let loadingProgress = null;
   let memoryPending = [];
   let syncing = false;
   let cooldownUntil = 0;
@@ -25,28 +27,43 @@
     if (Number.isFinite(saved)) cooldownUntil = Math.min(saved, Date.now() + COOLDOWN_MS);
   } catch { /* Use the in-memory timer when storage is unavailable. */ }
 
-  // The visual daily progress is local; Monetag postbacks are recorded separately
-  // after the Telegram identity is validated on our server.
-  function localDay() {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  async function refreshProgress() {
+    if (loadingProgress) return loadingProgress;
+    loadingProgress = (async () => {
+      const initData = window.Telegram?.WebApp?.initData;
+      if (!initData) throw new Error("Abra a Mini App pelo Telegram.");
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000);
+      try {
+        const response = await fetch(`${API_BASE}/api/impressions`, {
+          headers: { "x-telegram-init-data": initData },
+          cache: "no-store", signal: controller.signal
+        });
+        if (!response.ok) throw new Error("Não foi possível consultar as impressões.");
+        const data = await response.json();
+        if (!Number.isInteger(data.todayTotal) || data.todayTotal < 0 ||
+            !/^\d{4}-\d{2}-\d{2}$/.test(data.today) ||
+            !Number.isFinite(Date.parse(data.resetAt)) ||
+            !Number.isFinite(Date.parse(data.serverNow))) {
+          throw new Error("Resposta inválida do servidor.");
+        }
+        progress = data;
+        clearTimeout(resetTimer);
+        resetTimer = setTimeout(() => { void refreshProgress().catch(showProgressError); },
+          Math.max(100, Date.parse(data.resetAt) - Date.parse(data.serverNow) + 100));
+        render();
+      } finally { clearTimeout(timeout); }
+    })().catch(error => {
+      progress = null;
+      clearTimeout(resetTimer);
+      render();
+      throw error;
+    }).finally(() => { loadingProgress = null; });
+    return loadingProgress;
   }
 
-  function readState() {
-    let stored;
-    try { stored = JSON.parse(localStorage.getItem(STORAGE_KEY)); }
-    catch { stored = memoryState; }
-
-    const day = localDay();
-    if (!stored || stored.day !== day) return { day, count: 0 };
-    const count = Number.isInteger(stored.count) ? stored.count : 0;
-    return { day, count: Math.max(0, Math.min(DAILY_LIMIT, count)) };
-  }
-
-  function writeState(state) {
-    memoryState = state;
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
-    catch { /* The UI continues in memory if storage is unavailable. */ }
+  function showProgressError() {
+    showNotice("Não foi possível consultar o servidor. Tente novamente.", "error");
   }
 
   function readPending() {
@@ -120,9 +137,12 @@
   }
 
   function render() {
-    const { count } = readState();
+    const count = Math.min(DAILY_LIMIT, progress?.todayTotal || 0);
     countVisible.textContent = String(count);
     countA11y.textContent = String(count);
+    accountStatus.textContent = !progress ? "Conectando ao servidor..." :
+      progress.accountId ? `Young Money #${progress.accountId} • Telegram conectado` :
+        "Telegram conectado • vincule a conta pelo app Young Money";
     slots.replaceChildren();
 
     for (let i = 0; i < count; i++) {
@@ -134,11 +154,11 @@
       slots.append(mark);
     }
 
-    if (inFlight) {
+    if (inFlight || !progress) {
       button.disabled = true;
       button.dataset.state = "loading";
-      buttonLabel.textContent = "Carregando...";
-      button.setAttribute("aria-label", "Carregando vídeo");
+      buttonLabel.textContent = inFlight ? "Carregando..." : "Conectando...";
+      button.setAttribute("aria-label", inFlight ? "Carregando vídeo" : "Aguardando o servidor");
     } else if (count >= DAILY_LIMIT) {
       button.disabled = true;
       button.dataset.state = "limit";
@@ -153,7 +173,7 @@
     } else {
       button.disabled = false;
       button.dataset.state = "ready";
-      button.setAttribute("aria-label", `Assistir vídeo. ${count} de ${DAILY_LIMIT} hoje.`);
+      button.setAttribute("aria-label", `Assistir vídeo. ${count} de ${DAILY_LIMIT} impressões confirmadas hoje.`);
     }
   }
 
@@ -178,6 +198,11 @@
       startCooldown(retryAfterSeconds);
       return null;
     }
+    if (response.status === 409) {
+      await refreshProgress();
+      showNotice("Limite de impressões atingido. Volte após meia-noite.");
+      return null;
+    }
     if (!response.ok) throw new Error("Could not prepare ad");
     const { ymid } = await response.json();
     if (!/^[a-f0-9-]{36}$/i.test(ymid)) throw new Error("Invalid ad identifier");
@@ -185,9 +210,8 @@
   }
 
   button.addEventListener("click", async () => {
-    if (inFlight || secondsRemaining()) return;
-    const state = readState();
-    if (state.count >= DAILY_LIMIT) { render(); return; }
+    if (inFlight || !progress || secondsRemaining()) return;
+    if (progress.todayTotal >= DAILY_LIMIT) { render(); return; }
 
     const showAd = window.show_11977205;
     if (typeof showAd !== "function") {
@@ -205,41 +229,29 @@
       startCooldown(10);
       await showAd({ type: "end", ymid, requestVar: "daily_video", catchIfNoFeed: true }); // Zone 11977205.
       queueCompletion(ymid);
-      void syncPending();
-      const latest = readState();
-      if (latest.count < DAILY_LIMIT) {
-        const next = { day: latest.day, count: latest.count + 1 };
-        writeState(next);
-        showNotice(`Vídeo concluído! ${next.count} de ${DAILY_LIMIT} hoje.`);
-      }
+      await syncPending();
+      await refreshProgress().catch(showProgressError);
+      showNotice("Vídeo concluído. A contagem aparece após a confirmação da impressão.");
     } catch {
       showNotice(adStarted ? "O vídeo não foi concluído. Tente novamente." : "Abra pelo bot no Telegram e tente novamente.", "error");
     } finally {
       if (adStarted) startCooldown(10);
       inFlight = false;
       render();
+      setTimeout(() => { void refreshProgress().catch(showProgressError); }, 5000);
     }
   });
 
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) {
-      if (!inFlight) render();
+      void refreshProgress().catch(showProgressError);
       void syncPending();
     }
   });
   window.addEventListener("focus", () => {
-    if (!inFlight) render();
+    void refreshProgress().catch(showProgressError);
     void syncPending();
   });
-
-  function scheduleMidnightReset() {
-    const now = new Date();
-    const nextMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-    setTimeout(() => {
-      if (!inFlight) render();
-      scheduleMidnightReset();
-    }, nextMidnight.getTime() - now.getTime() + 50);
-  }
 
   try {
     window.Telegram?.WebApp?.ready();
@@ -248,6 +260,7 @@
 
   render();
   void syncPending();
+  void refreshProgress().catch(showProgressError);
+  setInterval(() => { if (!document.hidden) void refreshProgress().catch(showProgressError); }, 30000);
   if (secondsRemaining()) scheduleCooldownTimer();
-  scheduleMidnightReset();
 })();

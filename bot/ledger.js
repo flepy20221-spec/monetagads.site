@@ -4,6 +4,28 @@ const crypto = require("node:crypto");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 
+const brazilDayFormatter = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit"
+});
+
+function brazilDay(value) {
+  const parts = brazilDayFormatter.formatToParts(new Date(value));
+  const part = type => parts.find(item => item.type === type).value;
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
+function nextBrazilMidnight(timestamp) {
+  const day = brazilDay(timestamp);
+  let low = timestamp;
+  let high = timestamp + 48 * 3600000;
+  while (low + 1 < high) {
+    const middle = Math.floor((low + high) / 2);
+    if (brazilDay(middle) === day) low = middle;
+    else high = middle;
+  }
+  return new Date(high).toISOString();
+}
+
 // One Railway replica owns this append-only file on its persistent volume.
 // Writes are serialized and synced before a Monetag postback is acknowledged.
 async function createLedger(dataDir, now = () => Date.now()) {
@@ -16,6 +38,8 @@ async function createLedger(dataDir, now = () => Date.now()) {
   const clicks = new Map();
   const completions = new Map();
   const appLinks = new Map();
+  const accountBindings = new Map();
+  const telegramBindings = new Map();
   const profiles = new Map();
   const contents = await fs.readFile(file, "utf8").catch(error => {
     if (error.code === "ENOENT") return "";
@@ -36,6 +60,10 @@ async function createLedger(dataDir, now = () => Date.now()) {
     if (row.kind === "click") clicks.set(row.ymid, row);
     if (row.kind === "completion") completions.set(row.ymid, row);
     if (row.kind === "app_link") appLinks.set(row.tokenHash, row);
+    if (row.kind === "account_binding") {
+      accountBindings.set(row.accountId, row.userId);
+      telegramBindings.set(row.userId, row.accountId);
+    }
     if (row.kind === "profile") profiles.set(row.userId, { name: row.name, username: row.username || null, at: row.at });
   }
   if (contents && !contents.endsWith("\n")) {
@@ -61,6 +89,11 @@ async function createLedger(dataDir, now = () => Date.now()) {
     createAttempt(userId, profile = null) {
       return serialized(async () => {
         const timestamp = now();
+        if (this.counts(userId).todayTotal >= 15) {
+          const error = new Error("Daily impression limit reached");
+          error.status = 409;
+          throw error;
+        }
         const last = lastAttemptByUser.get(userId);
         const elapsed = last ? timestamp - Date.parse(last.at) : Infinity;
         if (elapsed < 10000) {
@@ -97,11 +130,26 @@ async function createLedger(dataDir, now = () => Date.now()) {
       });
     },
     getProfile(userId) { return profiles.get(userId) || null; },
-    linkApp(tokenHash, userId) {
+    linkApp(tokenHash, userId, accountId = null, deviceHash = null) {
       return serialized(async () => {
         if (appLinks.has(tokenHash)) return false;
+        if (accountId !== null && (accountBindings.has(accountId) &&
+              accountBindings.get(accountId) !== userId ||
+              telegramBindings.has(userId) && telegramBindings.get(userId) !== accountId)) {
+          const error = new Error("Young Money and Telegram accounts are already linked elsewhere");
+          error.status = 409;
+          throw error;
+        }
+        if (accountId !== null && !accountBindings.has(accountId)) {
+          const binding = { kind: "account_binding", accountId, userId, deviceHash,
+            at: new Date(now()).toISOString() };
+          await append(binding);
+          accountBindings.set(accountId, userId);
+          telegramBindings.set(userId, accountId);
+        }
         const row = {
           kind: "app_link", tokenHash, userId,
+          ...(accountId !== null ? { accountId } : {}),
           at: new Date(now()).toISOString(),
           expiresAt: new Date(now() + 30 * 86400000).toISOString()
         };
@@ -114,20 +162,14 @@ async function createLedger(dataDir, now = () => Date.now()) {
       const link = appLinks.get(tokenHash);
       return link && Date.parse(link.expiresAt) > now() ? link.userId : null;
     },
+    linkedAccount(userId) { return telegramBindings.get(userId) || null; },
+    linkAccount(tokenHash) { return appLinks.get(tokenHash)?.accountId || null; },
     dailyVideoProgress(userId) {
-      const formatter = new Intl.DateTimeFormat("en-US", {
-        timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit"
-      });
-      const parts = formatter.formatToParts(new Date(now()));
-      const part = type => parts.find(item => item.type === type).value;
-      const day = `${part("year")}-${part("month")}-${part("day")}`;
+      const day = brazilDay(now());
       let completed = 0;
       for (const row of completions.values()) {
         if (row.userId !== userId || !impressions.has(row.ymid)) continue;
-        const completedAt = new Date(row.at);
-        const finished = formatter.formatToParts(completedAt);
-        const value = type => finished.find(item => item.type === type).value;
-        if (`${value("year")}-${value("month")}-${value("day")}` === day) completed++;
+        if (brazilDay(row.at) === day) completed++;
       }
       return { day, completed: Math.min(completed, 15), goal: 15 };
     },
@@ -171,6 +213,7 @@ async function createLedger(dataDir, now = () => Date.now()) {
         const user = users.get(row.userId) || {
           telegramId: row.userId, impressions: 0, valuedImpressions: 0, completedVideos: 0,
           clicks: 0, estimatedUsd: 0, lastAt: row.at,
+          accountId: telegramBindings.get(row.userId) || null,
           name: profiles.get(row.userId)?.name || null,
           username: profiles.get(row.userId)?.username || null
         };
@@ -206,7 +249,7 @@ async function createLedger(dataDir, now = () => Date.now()) {
       const recentUsers = [...users.values()].sort((a, b) => b.lastAt.localeCompare(a.lastAt));
       totals.users = users.size;
       const selected = telegramId ? {
-        ...(users.get(telegramId) || { telegramId, impressions: 0, valuedImpressions: 0, completedVideos: 0, clicks: 0, estimatedUsd: 0, lastAt: null, name: null, username: null }),
+        ...(users.get(telegramId) || { telegramId, impressions: 0, valuedImpressions: 0, completedVideos: 0, clicks: 0, estimatedUsd: 0, lastAt: null, name: null, username: null, accountId: telegramBindings.get(telegramId) || null }),
         totalAds: ads.size,
         ads: [...ads.values()].sort((a, b) => b.at.localeCompare(a.at)).slice(0, limit)
       } : null;
@@ -216,13 +259,16 @@ async function createLedger(dataDir, now = () => Date.now()) {
       };
     },
     counts(userId) {
-      const today = new Date().toISOString().slice(0, 10);
-      const result = { today, total: 0, valued: 0, todayTotal: 0, todayValued: 0 };
+      const timestamp = now();
+      const today = brazilDay(timestamp);
+      const result = { today, serverNow: new Date(timestamp).toISOString(),
+        resetAt: nextBrazilMidnight(timestamp), total: 0,
+        valued: 0, todayTotal: 0, todayValued: 0, accountId: telegramBindings.get(userId) || null };
       for (const row of impressions.values()) {
         if (row.userId !== userId) continue;
         result.total++;
         if (row.valued) result.valued++;
-        if (row.at.slice(0, 10) === today) {
+        if (brazilDay(row.at) === today) {
           result.todayTotal++;
           if (row.valued) result.todayValued++;
         }

@@ -45,3 +45,64 @@ test("Mini App progress resets at midnight in Sao Paulo, counting only confirmed
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
+
+test("confirmed impressions use server time in Sao Paulo and survive storage clearing and restart", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "young-money-impressions-"));
+  let time = Date.parse("2026-10-08T02:59:30.000Z");
+  try {
+    let ledger = await createLedger(dir, () => time);
+    const ymid = await ledger.createAttempt("123");
+    await ledger.recordAdEvent({ ymid, userId: "123", event: "impression",
+      valued: false, price: 0, zone: "11977205", source: "daily_video" });
+    assert.equal(ledger.counts("123").today, "2026-10-07");
+    assert.equal(ledger.counts("123").todayTotal, 1);
+    assert.equal(ledger.counts("123").resetAt, "2026-10-08T03:00:00.000Z");
+    ledger = await createLedger(dir, () => time);
+    assert.equal(ledger.counts("123").todayTotal, 1);
+    assert.equal(ledger.counts("456").todayTotal, 0);
+    time += 30000;
+    assert.equal(ledger.counts("123").todayTotal, 0);
+    assert.equal(ledger.counts("123").total, 1);
+    assert.equal(ledger.counts("123").today, "2026-10-08");
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("account binding is permanent, one-to-one and preserved after restart", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "young-money-binding-"));
+  try {
+    let ledger = await createLedger(dir);
+    assert.equal(await ledger.linkApp("token1", "123", 42, "a".repeat(64)), true);
+    assert.equal(ledger.linkedAccount("123"), 42);
+    assert.equal(ledger.linkAccount("token1"), 42);
+    await assert.rejects(ledger.linkApp("token2", "456", 42), error => error.status === 409);
+    await assert.rejects(ledger.linkApp("token3", "123", 43), error => error.status === 409);
+    ledger = await createLedger(dir);
+    assert.equal(ledger.linkedAccount("123"), 42);
+    assert.equal(await ledger.linkApp("token4", "123", 42), true);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("daily impression cap is checked on the server and opens on the next Sao Paulo day", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "young-money-cap-"));
+  let time = Date.parse("2026-10-07T15:00:00.000Z");
+  try {
+    const ledger = await createLedger(dir, () => time);
+    for (let index = 0; index < 15; index++) {
+      const ymid = await ledger.createAttempt("123");
+      await ledger.recordAdEvent({ ymid, userId: "123", event: "impression",
+        valued: false, price: 0, zone: "11977205", source: "daily_video" });
+      time += 10000;
+    }
+    assert.equal(ledger.counts("123").todayTotal, 15);
+    await assert.rejects(ledger.createAttempt("123"), error => error.status === 409);
+    time = Date.parse("2026-10-08T03:00:00.000Z");
+    assert.equal(ledger.counts("123").todayTotal, 0);
+    assert.equal(typeof await ledger.createAttempt("123"), "string");
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});

@@ -7,10 +7,10 @@
     <meta name="description" content="Young Money: assista a vídeos e acompanhe seu limite diário." />
     <title>Young Money | Vídeos diários</title>
     <link rel="preload" href="./assets/young-money-space.webp?v=470b58c" as="image" />
-    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./styles.css?v=server-progress-v2" />
     <script src="https://telegram.org/js/telegram-web-app.js" defer></script>
     <script src="https://libtl.com/sdk.js" data-zone="11977205" data-sdk="show_11977205" defer></script>
-    <script src="./app.js?v=completed-v1" defer></script>
+    <script src="./app.js?v=server-progress-v2" defer></script>
   </head>
   <body>
     <main class="scene" aria-labelledby="page-title">
@@ -27,7 +27,7 @@
       />
 
       <section class="daily-progress" aria-label="Limite diário de vídeos">
-        <p class="sr-only">Vídeos assistidos hoje: <span id="count-a11y">0</span> de 15.</p>
+        <p class="sr-only">Impressões confirmadas hoje: <span id="count-a11y">0</span> de 15. Reinicia à meia-noite de Brasília.</p>
         <div class="count-cover" aria-hidden="true">
           <span id="count-visible" class="count-current">0</span>
           <span class="count-divider">/</span>
@@ -35,6 +35,8 @@
         </div>
         <div id="completed-slots" class="completed-slots" aria-hidden="true"></div>
       </section>
+
+      <p id="account-status" class="account-status" role="status">Conectando ao servidor...</p>
 
       <button id="watch-button" class="watch-button" type="button" aria-label="Assistir vídeo">
         <span class="sr-only">Assistir vídeo</span>

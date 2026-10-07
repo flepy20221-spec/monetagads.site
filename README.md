@@ -1,14 +1,18 @@
 # Young Money — Mini App no Telegram
 
-O site estático em `index.html` usa a zona Monetag `11977205` para anúncios recompensados e mostra um progresso visual de até 15 vídeos por dia. Ele é publicado em `https://flepy20221-spec.github.io/monetagads.site/`.
+O site estático em `index.html` usa a zona Monetag `11977205` para anúncios recompensados e mostra até 15 impressões confirmadas por dia. Ele é publicado em `https://flepy20221-spec.github.io/monetagads.site/`.
 
-O progresso fica no armazenamento local do navegador e **não é saldo, pontos nem comprovante de pagamento**. Cada tentativa de anúncio recebe um `ymid` único de um servidor que valida o `initData` do Telegram. Impressões confirmadas pela Monetag são contadas separadamente; uma impressão indica o início da exibição e pode ser não monetizada.
+O progresso exibido vem de `GET /api/impressions` após validar o `initData` do Telegram. A contagem diária é calculada no servidor em `America/Sao_Paulo` e reinicia à meia-noite de Brasília. Limpar os dados do navegador não altera o registro no volume. O servidor recusa novas tentativas quando já há 15 impressões confirmadas no dia. Uma impressão indica o início da exibição, pode ser não monetizada e **não é saldo, pontos nem comprovante de pagamento**.
 
 ## Bot
 
 O código do webhook de `@YoungMoneyOFC_bot` está em [`bot/`](bot/). Para implantá-lo no Railway, use este repositório com o diretório raiz `/bot`, um volume persistente montado em `/data` e as variáveis privadas `BOT_TOKEN`, `WEBHOOK_SECRET`, `MONETAG_POSTBACK_SECRET`, `WEBAPP_URL` e `DATA_DIR=/data`. O serviço atende `GET /health` e `POST /telegram/webhook`; a segunda rota aceita apenas requisições com o cabeçalho secreto configurado em `setWebhook` no Telegram. Nunca adicione tokens ao repositório.
 
-O site pede `POST /api/ad-attempts` com o `Telegram.WebApp.initData` assinado, passa o `ymid` retornado para `show_11977205({type:"end", ymid, requestVar:"daily_video"})` e pode consultar `GET /api/impressions` com o mesmo cabeçalho. O bot expõe `/status` para as contagens do próprio usuário. O servidor armazena tentativas, impressões e cliques num registro append-only no volume, responde a postbacks duplicados sem somar novamente e mantém os cliques fora da contagem de impressões.
+O site pede `POST /api/ad-attempts` com o `Telegram.WebApp.initData` assinado, passa o `ymid` retornado para `show_11977205({type:"end", ymid, requestVar:"daily_video"})` e consulta `GET /api/impressions` com o mesmo cabeçalho ao abrir, retornar à tela, após o anúncio e na virada do dia. O bot expõe `/status` para as contagens do próprio usuário. O servidor armazena tentativas, impressões e cliques num registro append-only no volume, responde a postbacks duplicados sem somar novamente e mantém os cliques fora da contagem de impressões.
+
+O app Android atualizado solicita `POST /api/app-links/v2` com seu token Young Money e o ID V4 do aparelho. O bot confirma os dois no endpoint `POST /api/v1/telegram/identity.php` da API principal, que consulta o vínculo ativo do aparelho com aquela conta. Após a confirmação privada no Telegram, o servidor grava a associação única entre os IDs Young Money e Telegram e um hash do ID do aparelho. O registro não depende do armazenamento local. O endpoint antigo `/api/app-links` permanece para versões já instaladas; elas não criam associação de conta validada e precisam usar o app atualizado para isso. O endpoint `/api/impressions` indica `accountId` quando a associação existe, e o painel exibe esse ID.
+
+Implante o endpoint aditivo da API Young Money antes do bot e publique o site após o bot. O bot usa `YOUNGMONEY_API_URL` se definido; sem ele, consulta a URL de produção existente no app. O app Android atualizado pode ser distribuído depois. Não há nova variável secreta para configurar. O volume `DATA_DIR` continua obrigatório para manter as contagens e os vínculos após reinícios.
 
 Após uma tentativa de anúncio, o botão mostra uma contagem regressiva de 10 segundos antes de permitir a próxima. A Mini App também espera 10 segundos após o anúncio fechar ou falhar. O servidor aplica um intervalo mínimo de 10 segundos entre tentativas do mesmo ID do Telegram, mesmo após recarregar a página ou reiniciar o serviço; durante esse intervalo, retorna HTTP 429 com `retryAfterSeconds`.
 

@@ -16,10 +16,10 @@ const config = {
   webAppUrl: "https://example.com/monetagads.site/"
 };
 
-async function withServer(run, { getTelegramChat = async () => null, getTelegramPhoto, answerCallback, setChatMenu = async () => {} } = {}) {
+async function withServer(run, { getTelegramChat = async () => null, getTelegramPhoto, getYoungMoneyAccount, answerCallback, setChatMenu = async () => {} } = {}) {
   const sent = [];
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "young-money-test-"));
-  const server = await createServer({ ...config, dataDir, sendMessage: async message => sent.push(message), answerCallback, setChatMenu, getTelegramChat, getTelegramPhoto });
+  const server = await createServer({ ...config, dataDir, sendMessage: async message => sent.push(message), answerCallback, setChatMenu, getTelegramChat, getTelegramPhoto, getYoungMoneyAccount });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   try {
     await run(`http://127.0.0.1:${server.address().port}`, sent, dataDir);
@@ -335,6 +335,73 @@ test("Telegram callback confirms the app link and exposes only today's paired co
     assert.equal(persisted.completed, 1);
     await new Promise(resolve => restarted.close(resolve));
   }, { answerCallback: async answer => answers.push(answer) });
+});
+
+test("v2 link verifies the Young Money token and preserves one account per Telegram user", async () => {
+  const answers = [];
+  let checked = 0;
+  const deviceId = "v4" + "a".repeat(62);
+  const deviceHeaders = { "x-youngmoney-device-id": deviceId };
+  await withServer(async (base, _sent, dataDir) => {
+    const endpoint = base + "/api/app-links/v2";
+    assert.equal((await fetch(endpoint, { method: "POST" })).status, 401);
+    assert.equal((await fetch(endpoint, {
+      method: "POST", headers: { authorization: "Bearer valid-youngmoney-token" }
+    })).status, 403);
+    assert.equal((await fetch(endpoint, {
+      method: "POST", headers: { ...deviceHeaders, authorization: "Bearer invalid-youngmoney-token" }
+    })).status, 401);
+    const linked = await fetch(endpoint, {
+      method: "POST", headers: { ...deviceHeaders, authorization: "Bearer valid-youngmoney-token" }
+    });
+    assert.equal(linked.status, 201);
+    const { token, url } = await linked.json();
+    const id = new URL(url).searchParams.get("start").slice(5);
+    const webhook = (telegramId, callbackId, linkId) => fetch(base + "/telegram/webhook", {
+      method: "POST", headers: { "x-telegram-bot-api-secret-token": config.webhookSecret },
+      body: JSON.stringify({ callback_query: { id: callbackId, data: "connect:" + linkId,
+        from: { id: telegramId, first_name: "Ana" },
+        message: { chat: { id: telegramId, type: "private" } } } })
+    });
+    assert.equal((await webhook(123, "first", id)).status, 200);
+    const status = await (await fetch(base + "/api/app-links/status", {
+      headers: { authorization: "Bearer " + token }
+    })).json();
+    assert.equal(status.accountId, 42);
+    const counts = await (await fetch(base + "/api/impressions", {
+      headers: { origin: "https://example.com", "x-telegram-init-data": initData(123) }
+    })).json();
+    assert.equal(counts.accountId, 42);
+    const admin = await (await fetch(base + "/admin/monetag?telegram_id=123", {
+      headers: { authorization: "Bearer " + config.adminSecret }
+    })).json();
+    assert.equal(admin.selected.accountId, 42);
+
+    const otherLink = await (await fetch(endpoint, {
+      method: "POST", headers: { ...deviceHeaders, authorization: "Bearer valid-youngmoney-token" }
+    })).json();
+    const otherId = new URL(otherLink.url).searchParams.get("start").slice(5);
+    assert.equal((await webhook(456, "conflict", otherId)).status, 200);
+    assert.match(answers.at(-1).text, /já está vinculada/);
+    assert.equal((await fetch(base + "/api/app-links/status", {
+      headers: { authorization: "Bearer " + otherLink.token }
+    })).status, 401);
+    const restarted = await createServer({ ...config, dataDir, sendMessage: async () => {} });
+    await new Promise(resolve => restarted.listen(0, "127.0.0.1", resolve));
+    const persisted = await (await fetch("http://127.0.0.1:" + restarted.address().port + "/api/impressions", {
+      headers: { origin: "https://example.com", "x-telegram-init-data": initData(123) }
+    })).json();
+    assert.equal(persisted.accountId, 42);
+    await new Promise(resolve => restarted.close(resolve));
+    assert.equal(checked, 3);
+  }, {
+    answerCallback: async answer => answers.push(answer),
+    getYoungMoneyAccount: async (token, id) => {
+      checked++;
+      return token === "valid-youngmoney-token" && id === deviceId ?
+        { id: 42, deviceHash: crypto.createHash("sha256").update(id).digest("hex") } : null;
+    }
+  });
 });
 
 test("old Telegram IDs receive a cached name from getChat without changing their ads", async () => {
