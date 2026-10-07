@@ -14,6 +14,7 @@ async function createLedger(dataDir, now = () => Date.now()) {
   const lastAttemptByUser = new Map();
   const impressions = new Map();
   const clicks = new Map();
+  const profiles = new Map();
   const contents = await fs.readFile(file, "utf8").catch(error => {
     if (error.code === "ENOENT") return "";
     throw error;
@@ -27,9 +28,11 @@ async function createLedger(dataDir, now = () => Date.now()) {
     if (row.kind === "attempt") {
       attempts.set(row.ymid, row);
       lastAttemptByUser.set(row.userId, row);
+      if (row.name) profiles.set(row.userId, { name: row.name, username: row.username || null, at: row.at });
     }
     if (row.kind === "impression") impressions.set(row.ymid, row);
     if (row.kind === "click") clicks.set(row.ymid, row);
+    if (row.kind === "profile") profiles.set(row.userId, { name: row.name, username: row.username || null, at: row.at });
   }
   if (contents && !contents.endsWith("\n")) {
     await fs.truncate(file, Buffer.byteLength(complete.join("\n") + "\n"));
@@ -51,7 +54,7 @@ async function createLedger(dataDir, now = () => Date.now()) {
     }
   }
   return {
-    createAttempt(userId) {
+    createAttempt(userId, profile = null) {
       return serialized(async () => {
         const timestamp = now();
         const last = lastAttemptByUser.get(userId);
@@ -62,13 +65,34 @@ async function createLedger(dataDir, now = () => Date.now()) {
           error.retryAfterSeconds = Math.ceil(Math.min(10000, 10000 - elapsed) / 1000);
           throw error;
         }
-        const row = { kind: "attempt", ymid: crypto.randomUUID(), userId, at: new Date(timestamp).toISOString() };
+        const row = {
+          kind: "attempt", ymid: crypto.randomUUID(), userId, at: new Date(timestamp).toISOString(),
+          ...(profile?.name ? { name: profile.name, username: profile.username || null } : {})
+        };
         await append(row);
         attempts.set(row.ymid, row);
         lastAttemptByUser.set(userId, row);
+        if (row.name) profiles.set(userId, { name: row.name, username: row.username, at: row.at });
         return row.ymid;
       });
     },
+    saveProfile(userId, profile) {
+      return serialized(async () => {
+        if (!profile?.name) return false;
+        const current = profiles.get(userId);
+        const timestamp = now();
+        if (current?.name === profile.name && current?.username === (profile.username || null) &&
+            timestamp - Date.parse(current.at) < 86400000) return false;
+        const row = {
+          kind: "profile", userId, name: profile.name,
+          username: profile.username || null, at: new Date(timestamp).toISOString()
+        };
+        await append(row);
+        profiles.set(userId, { name: row.name, username: row.username, at: row.at });
+        return true;
+      });
+    },
+    getProfile(userId) { return profiles.get(userId) || null; },
     recordAdEvent({ ymid, userId, event, valued, price, zone, sub, source }) {
       return serialized(async () => {
         const attempt = attempts.get(ymid);
@@ -93,7 +117,9 @@ async function createLedger(dataDir, now = () => Date.now()) {
         const usd = row.valued && Number.isFinite(row.price) && row.price > 0 ? row.price : 0;
         const user = users.get(row.userId) || {
           telegramId: row.userId, impressions: 0, valuedImpressions: 0,
-          clicks: 0, estimatedUsd: 0, lastAt: row.at
+          clicks: 0, estimatedUsd: 0, lastAt: row.at,
+          name: profiles.get(row.userId)?.name || null,
+          username: profiles.get(row.userId)?.username || null
         };
         if (row.kind === "impression") {
           totals.impressions++;
@@ -118,7 +144,7 @@ async function createLedger(dataDir, now = () => Date.now()) {
       const recentUsers = [...users.values()].sort((a, b) => b.lastAt.localeCompare(a.lastAt));
       totals.users = users.size;
       const selected = telegramId ? {
-        ...(users.get(telegramId) || { telegramId, impressions: 0, valuedImpressions: 0, clicks: 0, estimatedUsd: 0, lastAt: null }),
+        ...(users.get(telegramId) || { telegramId, impressions: 0, valuedImpressions: 0, clicks: 0, estimatedUsd: 0, lastAt: null, name: null, username: null }),
         totalAds: ads.size,
         ads: [...ads.values()].sort((a, b) => b.at.localeCompare(a.at)).slice(0, limit)
       } : null;

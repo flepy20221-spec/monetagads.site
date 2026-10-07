@@ -16,10 +16,10 @@ const config = {
   webAppUrl: "https://example.com/monetagads.site/"
 };
 
-async function withServer(run) {
+async function withServer(run, { getTelegramChat = async () => null } = {}) {
   const sent = [];
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "young-money-test-"));
-  const server = await createServer({ ...config, dataDir, sendMessage: async message => sent.push(message) });
+  const server = await createServer({ ...config, dataDir, sendMessage: async message => sent.push(message), getTelegramChat });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   try {
     await run(`http://127.0.0.1:${server.address().port}`, sent, dataDir);
@@ -29,8 +29,8 @@ async function withServer(run) {
   }
 }
 
-function initData(id) {
-  const params = new URLSearchParams({ auth_date: String(Math.floor(Date.now() / 1000)), user: JSON.stringify({ id }) });
+function initData(id, profile = {}) {
+  const params = new URLSearchParams({ auth_date: String(Math.floor(Date.now() / 1000)), user: JSON.stringify({ id, ...profile }) });
   const key = crypto.createHmac("sha256", "WebAppData").update(config.botToken).digest();
   const hash = crypto.createHmac("sha256", key).update([...params.entries()]
     .sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}=${v}`).join("\n")).digest("hex");
@@ -77,7 +77,7 @@ test("ignores group messages and rejects malformed JSON", async () => {
 
 test("signed user attempt links priced impression and click once, with a private admin report", async () => {
   await withServer(async (base, sent, dataDir) => {
-    const headers = { origin: "https://example.com", "x-telegram-init-data": initData(123) };
+    const headers = { origin: "https://example.com", "x-telegram-init-data": initData(123, { first_name: "Ana", last_name: "Silva", username: "ana_silva" }) };
     assert.equal((await fetch(`${base}/api/ad-attempts`, { method: "POST", headers: { ...headers, "x-telegram-init-data": "forged" } })).status, 401);
     assert.equal((await fetch(`${base}/api/ad-attempts`, { method: "POST", headers: { ...headers, origin: "https://evil.example" } })).status, 403);
     const attempt = await fetch(`${base}/api/ad-attempts`, { method: "POST", headers });
@@ -114,6 +114,8 @@ test("signed user attempt links priced impression and click once, with a private
     assert.equal(report.totals.clicks, 1);
     assert.equal(report.totals.users, 1);
     assert.equal(report.selected.telegramId, "123");
+    assert.equal(report.selected.name, "Ana Silva");
+    assert.equal(report.selected.username, "ana_silva");
     assert.equal(report.selected.totalAds, 1);
     assert.equal(report.selected.ads[0].ymid, ymid);
     assert.equal(report.selected.ads[0].estimatedUsd, 0.0074);
@@ -136,13 +138,42 @@ test("signed user attempt links priced impression and click once, with a private
     });
     assert.equal(status.status, 200);
     assert.match(sent[0].text, /Total: 1 \(1 monetizadas\)/);
-    const restarted = await createServer({ ...config, dataDir, sendMessage: async () => {} });
+    const restarted = await createServer({ ...config, dataDir, sendMessage: async () => {}, getTelegramChat: async () => null });
     assert.equal(restarted.listening, false);
     await new Promise(resolve => restarted.listen(0, "127.0.0.1", resolve));
     const reloadedCounts = await (await fetch(`http://127.0.0.1:${restarted.address().port}/api/impressions`, { headers })).json();
     assert.equal(reloadedCounts.total, 1);
     const reloadedReport = await (await fetch(`http://127.0.0.1:${restarted.address().port}/admin/monetag?telegram_id=123`, { headers: adminHeaders })).json();
     assert.equal(reloadedReport.selected.ads[0].estimatedUsd, 0.0074);
+    assert.equal(reloadedReport.selected.name, "Ana Silva");
     await new Promise(resolve => restarted.close(resolve));
   });
+});
+
+test("old Telegram IDs receive a cached name from getChat without changing their ads", async () => {
+  let lookups = 0;
+  await withServer(async (base, _sent, dataDir) => {
+    const headers = { origin: "https://example.com", "x-telegram-init-data": initData(789) };
+    const { ymid } = await (await fetch(`${base}/api/ad-attempts`, { method: "POST", headers })).json();
+    const url = new URL(`${base}/monetag/postback`);
+    Object.entries({ key: config.postbackSecret, ymid, event: "impression", value: "valued", zone: "11977205", telegram_id: "789", source: "daily_video", price: "0.00123" })
+      .forEach(([key, value]) => url.searchParams.set(key, value));
+    assert.equal((await (await fetch(url)).json()).result, "recorded");
+    const adminHeaders = { authorization: `Bearer ${config.adminSecret}` };
+    const reportUrl = `${base}/admin/monetag?telegram_id=789`;
+    const first = await (await fetch(reportUrl, { headers: adminHeaders })).json();
+    assert.equal(first.selected.name, "Carlos Farias");
+    assert.equal(first.users[0].name, "Carlos Farias");
+    assert.equal(first.selected.estimatedUsd, 0.00123);
+    await fetch(reportUrl, { headers: adminHeaders });
+    assert.equal(lookups, 1);
+    const restarted = await createServer({ ...config, dataDir, sendMessage: async () => {}, getTelegramChat: async () => { throw new Error("offline"); } });
+    await new Promise(resolve => restarted.listen(0, "127.0.0.1", resolve));
+    const reloaded = await (await fetch(`http://127.0.0.1:${restarted.address().port}/admin/monetag?telegram_id=789`, { headers: adminHeaders })).json();
+    assert.equal(reloaded.selected.name, "Carlos Farias");
+    await new Promise(resolve => restarted.close(resolve));
+  }, { getTelegramChat: async id => {
+    lookups++;
+    return { id: Number(id), type: "private", first_name: "Carlos", last_name: "Farias", username: "carlos" };
+  } });
 });

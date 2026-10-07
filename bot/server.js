@@ -18,6 +18,16 @@ function reply(res, status, body) {
   res.end(JSON.stringify(body));
 }
 
+function profileFromTelegram(user) {
+  if (!user || typeof user !== "object") return null;
+  const clean = value => typeof value === "string"
+    ? value.replace(/[\x00-\x1f\x7f]/g, "").trim().slice(0, 80) : "";
+  const username = /^[A-Za-z0-9_]{1,32}$/.test(user.username || "") ? user.username : null;
+  const name = [clean(user.first_name), clean(user.last_name)].filter(Boolean).join(" ").slice(0, 160)
+    || (username ? `@${username}` : "");
+  return name ? { name, username } : null;
+}
+
 function verifyInitData(raw, botToken, now = Date.now()) {
   if (typeof raw !== "string" || !raw || raw.length > 8192) return null;
   const params = new URLSearchParams(raw);
@@ -37,7 +47,7 @@ function verifyInitData(raw, botToken, now = Date.now()) {
   try {
     const user = JSON.parse(params.get("user"));
     if (!Number.isSafeInteger(user.id) || user.id <= 0) return null;
-    return String(user.id);
+    return { id: String(user.id), profile: profileFromTelegram(user) };
   } catch { return null; }
 }
 
@@ -94,7 +104,7 @@ function makeMessage(update, webAppUrl, ledger) {
   };
 }
 
-async function createServer({ botToken, webhookSecret, postbackSecret, adminSecret, webAppUrl, dataDir, sendMessage }) {
+async function createServer({ botToken, webhookSecret, postbackSecret, adminSecret, webAppUrl, dataDir, sendMessage, getTelegramChat }) {
   if (!botToken || !/^[A-Za-z0-9_-]{16,256}$/.test(webhookSecret || "") ||
       !/^[A-Za-z0-9_-]{32,256}$/.test(postbackSecret || "")) {
     throw new Error("BOT_TOKEN, WEBHOOK_SECRET and MONETAG_POSTBACK_SECRET must be configured");
@@ -104,6 +114,37 @@ async function createServer({ botToken, webhookSecret, postbackSecret, adminSecr
   const appUrl = url.toString();
   const ledger = await createLedger(dataDir);
   const allowedOrigin = new URL(appUrl).origin;
+  const profileLookupAt = new Map();
+
+  const lookupChat = getTelegramChat || (async userId => {
+    const endpoint = new URL(`https://api.telegram.org/bot${botToken}/getChat`);
+    endpoint.searchParams.set("chat_id", userId);
+    const response = await fetch(endpoint, { signal: AbortSignal.timeout(2000) });
+    if (!response.ok) return null;
+    const payload = await response.json();
+    return payload.ok ? payload.result : null;
+  });
+
+  async function hydrateReportNames(report) {
+    const candidates = [report.selected?.totalAds ? report.selected : null, ...report.users]
+      .filter(Boolean).map(user => user.telegramId);
+    const unique = [...new Set(candidates)];
+    await Promise.all(unique.filter(userId => {
+      const profile = ledger.getProfile(userId);
+      if (profile?.name && Date.now() - Date.parse(profile.at) < 86400000) return false;
+      if (Date.now() - (profileLookupAt.get(userId) || 0) < 21600000) return false;
+      return true;
+    }).slice(0, 8).map(async userId => {
+      profileLookupAt.set(userId, Date.now());
+      try {
+        const chat = await lookupChat(userId);
+        if (chat?.type === "private" && String(chat.id) === userId) {
+          const profile = profileFromTelegram(chat);
+          if (profile) await ledger.saveProfile(userId, profile);
+        }
+      } catch { /* O bot pode não ter acesso a todos os chats privados. */ }
+    }));
+  }
 
   const send = sendMessage || (async payload => {
     const response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
@@ -139,6 +180,8 @@ async function createServer({ botToken, webhookSecret, postbackSecret, adminSecr
           !/^(?:[1-9]|[1-9]\d|100)$/.test(limitText)) {
         reply(res, 400, { ok: false }); return;
       }
+      const report = ledger.report(telegramId, Number(limitText));
+      await hydrateReportNames(report);
       reply(res, 200, ledger.report(telegramId, Number(limitText)));
       return;
     }
@@ -151,16 +194,16 @@ async function createServer({ botToken, webhookSecret, postbackSecret, adminSecr
         res.end();
         return;
       }
-      const userId = verifyInitData(req.headers["x-telegram-init-data"], botToken);
-      if (!userId) { reply(res, 401, { ok: false }); return; }
+      const user = verifyInitData(req.headers["x-telegram-init-data"], botToken);
+      if (!user) { reply(res, 401, { ok: false }); return; }
       try {
         if (req.method === "POST" && requestUrl.pathname === "/api/ad-attempts") {
-          const ymid = await ledger.createAttempt(userId);
+          const ymid = await ledger.createAttempt(user.id, user.profile);
           reply(res, 201, { ymid });
           return;
         }
         if (req.method === "GET" && requestUrl.pathname === "/api/impressions") {
-          reply(res, 200, ledger.counts(userId));
+          reply(res, 200, ledger.counts(user.id));
           return;
         }
       } catch (error) {
@@ -217,6 +260,10 @@ async function createServer({ botToken, webhookSecret, postbackSecret, adminSecr
     }
     try {
       const update = await readJson(req);
+      const from = update?.message?.from;
+      if (update?.message?.chat?.type === "private" && Number.isSafeInteger(from?.id) && from.id > 0) {
+        await ledger.saveProfile(String(from.id), profileFromTelegram(from));
+      }
       const message = makeMessage(update, appUrl, ledger);
       if (message) await send(message);
       reply(res, 200, { ok: true });
