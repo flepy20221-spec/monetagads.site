@@ -29,6 +29,10 @@ function profileFromTelegram(user) {
   return name ? { name, username } : null;
 }
 
+function displayName(user) {
+  return profileFromTelegram(user)?.name || "usuário";
+}
+
 async function fetchTelegramPhoto(botToken, userId, request = fetch) {
   const signal = AbortSignal.timeout(6500);
   const photosUrl = new URL(`https://api.telegram.org/bot${botToken}/getUserProfilePhotos`);
@@ -133,6 +137,25 @@ async function configureTelegramWebhook(botToken, webhookSecret, publicDomain, r
   }
 }
 
+async function configureChatMenu(botToken, request = fetch) {
+  const endpoint = `https://api.telegram.org/bot${botToken}/`;
+  const response = await request(endpoint + "setChatMenuButton", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ menu_button: { type: "commands" } }),
+    signal: AbortSignal.timeout(8000)
+  });
+  if (!response.ok || !(await response.json()).ok) {
+    throw new Error(`Telegram setChatMenuButton failed (${response.status})`);
+  }
+  const check = await request(endpoint + "getChatMenuButton", {
+    signal: AbortSignal.timeout(8000)
+  });
+  if (!check.ok || (await check.json()).result?.type !== "commands") {
+    throw new Error("Telegram chat menu did not switch to commands");
+  }
+}
+
 function makeMessage(update, webAppUrl, ledger) {
   const message = update?.message;
   if (message?.chat?.type !== "private" || typeof message.text !== "string") return null;
@@ -160,7 +183,7 @@ function makeMessage(update, webAppUrl, ledger) {
   }
   return {
     chat_id: message.chat.id,
-    text: "Bem-vindo ao Young Money! Abra a Mini App para assistir aos vídeos disponíveis e acompanhar seu limite diário de até 15 vídeos.",
+    text: `Olá, ${displayName(message.from)}! Bem-vindo ao Young Money. Abra a Mini App para assistir aos vídeos disponíveis e acompanhar seu limite diário de até 15 vídeos.`,
     reply_markup: { inline_keyboard: [[{ text: "🚀 Abrir Mini App", web_app: { url: webAppUrl } }], [{ text: "Privacidade", url: privacyUrl }]] }
   };
 }
@@ -435,7 +458,7 @@ async function createServer({ botToken, webhookSecret, postbackSecret, adminSecr
           text: active ? "Conta vinculada. Volte ao aplicativo Young Money." : "Vínculo expirado. Abra o aplicativo para gerar outro.",
           show_alert: !active
         });
-        if (active) await send({ chat_id: userId, text: "Sua conta Telegram foi vinculada ao card Mini App. O card mostra os vídeos de hoje e não dá pontos. Abra a Mini App para assistir aos vídeos.", reply_markup: { inline_keyboard: [[{ text: "🚀 Abrir Mini App", web_app: { url: appUrl } }]] } });
+        if (active) await send({ chat_id: userId, text: `${displayName(callback.from)}, sua conta Telegram foi vinculada ao card Mini App. O card mostra os vídeos de hoje e não dá pontos. Abra a Mini App para assistir aos vídeos.`, reply_markup: { inline_keyboard: [[{ text: "🚀 Abrir Mini App", web_app: { url: appUrl } }]] } });
         reply(res, 200, { ok: true });
         return;
       }
@@ -450,7 +473,7 @@ async function createServer({ botToken, webhookSecret, postbackSecret, adminSecr
         if (link && link.expiresAt > Date.now()) {
           await send({
             chat_id: from.id,
-            text: "Vincular o progresso dos vídeos do Telegram ao aplicativo Young Money neste dispositivo? O card mostrará sua contagem diária de até 15 vídeos. Essa ação não concede pontos.",
+            text: `Conta Telegram: ${displayName(from)}. Vincular seu progresso dos vídeos ao aplicativo Young Money neste dispositivo? O card mostrará sua contagem diária de até 15 vídeos. Essa ação não concede pontos.`,
             reply_markup: { inline_keyboard: [[{ text: "Vincular meu progresso", callback_data: `connect:${linkId}` }]] }
           });
         } else {
@@ -489,7 +512,12 @@ if (require.main === module) {
     }).catch(error => {
       console.error("Telegram webhook subscription failed:", error.message);
     });
+    configureChatMenu(process.env.BOT_TOKEN).then(() => {
+      console.log("Telegram chat menu set to commands");
+    }).catch(error => {
+      console.error("Telegram chat menu update failed:", error.message);
+    });
   })).catch(error => { console.error("Startup failed:", error); process.exitCode = 1; });
 }
 
-module.exports = { createServer, makeMessage, verifyInitData, fetchTelegramPhoto, configureTelegramWebhook };
+module.exports = { createServer, makeMessage, verifyInitData, fetchTelegramPhoto, configureTelegramWebhook, configureChatMenu };

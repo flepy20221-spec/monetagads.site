@@ -6,7 +6,7 @@ const crypto = require("node:crypto");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
-const { createServer, fetchTelegramPhoto, configureTelegramWebhook } = require("./server");
+const { createServer, fetchTelegramPhoto, configureTelegramWebhook, configureChatMenu } = require("./server");
 
 const config = {
   botToken: "test-token",
@@ -70,17 +70,31 @@ test("startup registers callback_query updates without discarding pending messag
     "attacker.example", async () => { throw new Error("must not send"); }));
 });
 
+test("bot switches the blue Mini App chat button to the normal commands menu", async () => {
+  const requests = [];
+  await configureChatMenu(config.botToken, async (url, options) => {
+    requests.push(url);
+    if (url.endsWith("/setChatMenuButton")) {
+      assert.deepEqual(JSON.parse(options.body), { menu_button: { type: "commands" } });
+      return new Response(JSON.stringify({ ok: true, result: true }));
+    }
+    return new Response(JSON.stringify({ ok: true, result: { type: "commands" } }));
+  });
+  assert.equal(requests.length, 2);
+});
+
 test("private /start returns the Mini App button and privacy link", async () => {
   await withServer(async (base, sent) => {
     const response = await fetch(`${base}/telegram/webhook`, {
       method: "POST",
       headers: { "x-telegram-bot-api-secret-token": config.webhookSecret },
-      body: JSON.stringify({ message: { chat: { id: 123, type: "private" }, text: "/start" } })
+      body: JSON.stringify({ message: { chat: { id: 123, type: "private" }, from: { id: 123, first_name: "Ana", last_name: "Silva" }, text: "/start" } })
     });
     assert.equal(response.status, 200);
     assert.equal(sent[0].chat_id, 123);
     assert.equal(sent[0].reply_markup.inline_keyboard[0][0].web_app.url, config.webAppUrl);
     assert.equal(sent[0].reply_markup.inline_keyboard[1][0].url, `${config.webAppUrl}privacy.html`);
+    assert.match(sent[0].text, /Olá, Ana Silva!/);
   });
 });
 
@@ -262,11 +276,13 @@ test("Telegram callback confirms the app link and exposes only today's paired co
     });
     await webhook({ message: { chat: { id: 123, type: "private" }, from: { id: 123, first_name: "Ana" }, text: `/start link_${id}` } });
     assert.equal(sent[0].reply_markup.inline_keyboard[0][0].callback_data, `connect:${id}`);
+    assert.match(sent[0].text, /Conta Telegram: Ana/);
     assert.equal((await (await fetch(statusUrl, { headers: auth })).json()).state, "pending");
     await webhook({ callback_query: { id: "bad", data: `connect:${id}`, from: { id: 456 }, message: { chat: { id: 123, type: "private" } } } });
     assert.equal((await (await fetch(statusUrl, { headers: auth })).json()).state, "pending");
     await webhook({ callback_query: { id: "good", data: `connect:${id}`, from: { id: 123, first_name: "Ana" }, message: { chat: { id: 123, type: "private" } } } });
     assert.equal(answers.at(-1).text.startsWith("Conta vinculada"), true);
+    assert.match(sent.at(-1).text, /^Ana, sua conta Telegram foi vinculada/);
     let progress = await (await fetch(statusUrl, { headers: auth })).json();
     assert.equal(progress.state, "linked");
     assert.equal(progress.completed, 0);
