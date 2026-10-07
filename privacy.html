@@ -21,10 +21,11 @@
     <h2>Funcionamento e armazenamento</h2>
     <p>A contagem de até 15 vídeos por dia fica no armazenamento local do navegador do Telegram ou do dispositivo. Ela pode ser apagada ao limpar os dados do site. Esse contador é apenas visual: não constitui saldo, pontos ou comprovante de pagamento.</p>
     <p>Quando você envia comandos ao bot, o Telegram entrega ao serviço do bot os dados da mensagem e do chat necessários para responder. O serviço não mantém um banco de dados de conversas.</p>
+    <p>Antes de solicitar um anúncio, enviamos os dados de autenticação da Mini App ao nosso servidor para verificar seu ID do Telegram. O servidor cria um identificador único para a tentativa e registra esse ID do Telegram, a hora e o identificador da tentativa. Quando a Monetag confirma uma impressão, guardamos o tipo do evento, a zona e a classificação como monetizada ou não monetizada, além do valor estimado recebido. Esses registros ficam no armazenamento persistente do serviço para contabilização e prevenção de duplicidades. O comando /status mostra apenas as contagens associadas ao seu próprio ID.</p>
   </section>
   <section>
     <h2>Anúncios e Telegram</h2>
-    <p>A Mini App carrega o SDK da Monetag para exibir anúncios. A Monetag pode tratar informações de acesso e interação com os anúncios; quando disponível, o SDK pode receber o identificador do usuário fornecido pelo ambiente da Mini App do Telegram. Consulte a <a href="https://monetag.com/privacy/">política de privacidade da Monetag</a> e a <a href="https://telegram.org/privacy">política de privacidade do Telegram</a> para conhecer o tratamento feito por esses serviços.</p>
+    <p>A Mini App carrega o SDK da Monetag para exibir anúncios. A Monetag pode tratar informações de acesso e interação com os anúncios; quando disponível, o SDK pode receber o identificador do usuário fornecido pelo ambiente da Mini App do Telegram. Uma impressão confirma que o anúncio começou a aparecer, não que o vídeo foi concluído. As contagens e os valores estimados não são saldo, pontos nem promessa de saque. Consulte a <a href="https://monetag.com/privacy/">política de privacidade da Monetag</a> e a <a href="https://telegram.org/privacy">política de privacidade do Telegram</a> para conhecer o tratamento feito por esses serviços.</p>
   </section>
   <p><a href="./">Voltar à Mini App</a></p>
 </body>
