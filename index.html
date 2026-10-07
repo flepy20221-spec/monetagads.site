@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#030826" />
+    <meta name="description" content="Young Money: assista a vídeos e acompanhe seu limite diário." />
+    <title>Young Money | Vídeos diários</title>
+    <link rel="preload" href="./assets/young-money-space.webp" as="image" />
+    <link rel="stylesheet" href="./styles.css" />
+    <script src="https://telegram.org/js/telegram-web-app.js" defer></script>
+    <script src="https://libtl.com/sdk.js" data-zone="11970311" data-sdk="show_11970311" defer></script>
+    <script src="./app.js" defer></script>
+  </head>
+  <body>
+    <main class="scene" aria-labelledby="page-title">
+      <h1 id="page-title" class="sr-only">Young Money</h1>
+      <p class="sr-only">Vídeos, recompensas, todos os dias. Você pode assistir até 15 vídeos por dia.</p>
+
+      <img
+        class="scene-art"
+        src="./assets/young-money-space.webp"
+        alt=""
+        draggable="false"
+        width="900"
+        height="1600"
+      />
+
+      <section class="daily-progress" aria-label="Limite diário de vídeos">
+        <p class="sr-only">Vídeos assistidos hoje: <span id="count-a11y">0</span> de 15.</p>
+        <div class="count-cover" aria-hidden="true">
+          <span id="count-visible" class="count-current">0</span>
+          <span class="count-divider">/</span>
+          <span class="count-total">15</span>
+        </div>
+        <div id="completed-slots" class="completed-slots" aria-hidden="true"></div>
+      </section>
+
+      <button id="watch-button" class="watch-button" type="button" aria-label="Assistir vídeo">
+        <span class="sr-only">Assistir vídeo</span>
+        <span class="button-state" aria-hidden="true">
+          <span class="button-spinner"></span>
+          <span id="button-state-label">Carregando...</span>
+        </span>
+      </button>
+
+      <div id="notice" class="notice" role="status" aria-live="polite"></div>
+    </main>
+  </body>
+</html>
