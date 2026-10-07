@@ -6,11 +6,12 @@ const path = require("node:path");
 
 // One Railway replica owns this append-only file on its persistent volume.
 // Writes are serialized and synced before a Monetag postback is acknowledged.
-async function createLedger(dataDir) {
+async function createLedger(dataDir, now = () => Date.now()) {
   if (!dataDir) throw new Error("DATA_DIR must point to a persistent volume");
   await fs.mkdir(dataDir, { recursive: true });
   const file = path.join(dataDir, "ad-events.jsonl");
   const attempts = new Map();
+  const lastAttemptByUser = new Map();
   const impressions = new Map();
   const contents = await fs.readFile(file, "utf8").catch(error => {
     if (error.code === "ENOENT") return "";
@@ -22,7 +23,10 @@ async function createLedger(dataDir) {
   for (const line of complete) {
     if (!line) continue;
     const row = JSON.parse(line);
-    if (row.kind === "attempt") attempts.set(row.ymid, row);
+    if (row.kind === "attempt") {
+      attempts.set(row.ymid, row);
+      lastAttemptByUser.set(row.userId, row);
+    }
     if (row.kind === "impression") impressions.set(row.ymid, row);
   }
   if (contents && !contents.endsWith("\n")) {
@@ -47,9 +51,19 @@ async function createLedger(dataDir) {
   return {
     createAttempt(userId) {
       return serialized(async () => {
-        const row = { kind: "attempt", ymid: crypto.randomUUID(), userId, at: new Date().toISOString() };
+        const timestamp = now();
+        const last = lastAttemptByUser.get(userId);
+        const elapsed = last ? timestamp - Date.parse(last.at) : Infinity;
+        if (elapsed < 10000) {
+          const error = new Error("Ad cooldown active");
+          error.status = 429;
+          error.retryAfterSeconds = Math.ceil(Math.min(10000, 10000 - elapsed) / 1000);
+          throw error;
+        }
+        const row = { kind: "attempt", ymid: crypto.randomUUID(), userId, at: new Date(timestamp).toISOString() };
         await append(row);
         attempts.set(row.ymid, row);
+        lastAttemptByUser.set(userId, row);
         return row.ymid;
       });
     },
