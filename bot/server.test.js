@@ -184,6 +184,44 @@ test("admin photo endpoint serves a small Telegram thumbnail without exposing th
   }, { getTelegramPhoto: async id => { photoLookups++; assert.equal(id, "123"); return photo; } });
 });
 
+test("video total counts one signed SDK completion only after a Monetag impression and survives restart", async () => {
+  await withServer(async (base, _sent, dataDir) => {
+    const headers = { origin: "https://example.com", "x-telegram-init-data": initData(123, { first_name: "Ana" }) };
+    const { ymid } = await (await fetch(`${base}/api/ad-attempts`, { method: "POST", headers })).json();
+    const completionUrl = `${base}/api/ad-completions`;
+    const completion = { method: "POST", headers: { ...headers, "content-type": "application/json" }, body: JSON.stringify({ ymid }) };
+    assert.equal((await fetch(completionUrl, { ...completion, headers: { ...completion.headers, "x-telegram-init-data": "forged" } })).status, 401);
+    assert.equal((await fetch(completionUrl, { ...completion, headers: { ...completion.headers, origin: "https://evil.example" } })).status, 403);
+    assert.equal((await fetch(completionUrl, { ...completion, headers: { ...completion.headers, "x-telegram-init-data": initData(456) } })).status, 404);
+    assert.equal((await fetch(completionUrl, { ...completion, body: "{}" })).status, 400);
+    assert.equal((await (await fetch(completionUrl, completion)).json()).result, "recorded");
+    assert.equal((await (await fetch(completionUrl, completion)).json()).result, "duplicate");
+
+    const adminUrl = `${base}/admin/monetag?telegram_id=123`;
+    const adminHeaders = { authorization: `Bearer ${config.adminSecret}` };
+    let report = await (await fetch(adminUrl, { headers: adminHeaders })).json();
+    assert.equal(report.totals.completedVideos, 0);
+
+    const postback = new URL(`${base}/monetag/postback`);
+    Object.entries({ key: config.postbackSecret, ymid, event: "click", value: "valued", zone: "11977205", telegram_id: "123", source: "daily_video", price: "0.001" })
+      .forEach(([key, value]) => postback.searchParams.set(key, value));
+    assert.equal((await (await fetch(postback)).json()).result, "recorded");
+    report = await (await fetch(adminUrl, { headers: adminHeaders })).json();
+    assert.equal(report.selected.completedVideos, 0);
+    postback.searchParams.set("event", "impression");
+    assert.equal((await (await fetch(postback)).json()).result, "recorded");
+    report = await (await fetch(adminUrl, { headers: adminHeaders })).json();
+    assert.equal(report.totals.completedVideos, 1);
+    assert.equal(report.selected.completedVideos, 1);
+    assert.equal(report.users[0].completedVideos, 1);
+    const restarted = await createServer({ ...config, dataDir, sendMessage: async () => {}, getTelegramChat: async () => null });
+    await new Promise(resolve => restarted.listen(0, "127.0.0.1", resolve));
+    const reloaded = await (await fetch(`http://127.0.0.1:${restarted.address().port}/admin/monetag?telegram_id=123`, { headers: adminHeaders })).json();
+    assert.equal(reloaded.selected.completedVideos, 1);
+    await new Promise(resolve => restarted.close(resolve));
+  });
+});
+
 test("old Telegram IDs receive a cached name from getChat without changing their ads", async () => {
   let lookups = 0;
   await withServer(async (base, _sent, dataDir) => {

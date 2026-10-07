@@ -250,7 +250,8 @@ async function createServer({ botToken, webhookSecret, postbackSecret, adminSecr
       reply(res, 200, ledger.report(telegramId, Number(limitText)));
       return;
     }
-    if (requestUrl.pathname === "/api/ad-attempts" || requestUrl.pathname === "/api/impressions") {
+    if (requestUrl.pathname === "/api/ad-attempts" || requestUrl.pathname === "/api/impressions" ||
+        requestUrl.pathname === "/api/ad-completions") {
       if (req.headers.origin !== allowedOrigin) { reply(res, 403, { ok: false }); return; }
       res.setHeader("access-control-allow-origin", allowedOrigin);
       res.setHeader("vary", "Origin");
@@ -271,7 +272,22 @@ async function createServer({ botToken, webhookSecret, postbackSecret, adminSecr
           reply(res, 200, ledger.counts(user.id));
           return;
         }
+        if (req.method === "POST" && requestUrl.pathname === "/api/ad-completions") {
+          const body = await readJson(req);
+          if (!body || typeof body !== "object" || Object.keys(body).length !== 1 ||
+              !/^[a-f0-9-]{36}$/i.test(body.ymid || "")) {
+            reply(res, 400, { ok: false });
+            return;
+          }
+          const result = await ledger.recordCompletion(user.id, body.ymid);
+          reply(res, result === "ignored" ? 404 : 200, { ok: result !== "ignored", result });
+          return;
+        }
       } catch (error) {
+        if (error.status === 400 || error.status === 413) {
+          reply(res, error.status, { ok: false });
+          return;
+        }
         if (error.status === 429) {
           res.setHeader("retry-after", String(error.retryAfterSeconds));
           reply(res, 429, { ok: false, retryAfterSeconds: error.retryAfterSeconds });

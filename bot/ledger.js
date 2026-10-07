@@ -14,6 +14,7 @@ async function createLedger(dataDir, now = () => Date.now()) {
   const lastAttemptByUser = new Map();
   const impressions = new Map();
   const clicks = new Map();
+  const completions = new Map();
   const profiles = new Map();
   const contents = await fs.readFile(file, "utf8").catch(error => {
     if (error.code === "ENOENT") return "";
@@ -32,6 +33,7 @@ async function createLedger(dataDir, now = () => Date.now()) {
     }
     if (row.kind === "impression") impressions.set(row.ymid, row);
     if (row.kind === "click") clicks.set(row.ymid, row);
+    if (row.kind === "completion") completions.set(row.ymid, row);
     if (row.kind === "profile") profiles.set(row.userId, { name: row.name, username: row.username || null, at: row.at });
   }
   if (contents && !contents.endsWith("\n")) {
@@ -93,6 +95,17 @@ async function createLedger(dataDir, now = () => Date.now()) {
       });
     },
     getProfile(userId) { return profiles.get(userId) || null; },
+    recordCompletion(userId, ymid) {
+      return serialized(async () => {
+        const attempt = attempts.get(ymid);
+        if (!attempt || attempt.userId !== userId) return "ignored";
+        if (completions.has(ymid)) return "duplicate";
+        const row = { kind: "completion", ymid, userId, at: new Date(now()).toISOString() };
+        await append(row);
+        completions.set(ymid, row);
+        return "recorded";
+      });
+    },
     recordAdEvent({ ymid, userId, event, valued, price, zone, sub, source }) {
       return serialized(async () => {
         const attempt = attempts.get(ymid);
@@ -110,7 +123,7 @@ async function createLedger(dataDir, now = () => Date.now()) {
     },
     report(telegramId = "", limit = 100) {
       const today = new Date(now()).toISOString().slice(0, 10);
-      const totals = { impressions: 0, valuedImpressions: 0, clicks: 0, estimatedUsd: 0, todayEstimatedUsd: 0, users: 0 };
+      const totals = { impressions: 0, valuedImpressions: 0, completedVideos: 0, clicks: 0, estimatedUsd: 0, todayEstimatedUsd: 0, users: 0 };
       const firstDay = Date.parse(`${today}T00:00:00.000Z`) - 29 * 86400000;
       const dailyRevenue = new Map(Array.from({ length: 30 }, (_, index) => [
         new Date(firstDay + index * 86400000).toISOString().slice(0, 10), 0
@@ -120,7 +133,7 @@ async function createLedger(dataDir, now = () => Date.now()) {
       for (const row of [...impressions.values(), ...clicks.values()]) {
         const usd = row.valued && Number.isFinite(row.price) && row.price > 0 ? row.price : 0;
         const user = users.get(row.userId) || {
-          telegramId: row.userId, impressions: 0, valuedImpressions: 0,
+          telegramId: row.userId, impressions: 0, valuedImpressions: 0, completedVideos: 0,
           clicks: 0, estimatedUsd: 0, lastAt: row.at,
           name: profiles.get(row.userId)?.name || null,
           username: profiles.get(row.userId)?.username || null
@@ -147,10 +160,17 @@ async function createLedger(dataDir, now = () => Date.now()) {
           ads.set(row.ymid, ad);
         }
       }
+      for (const row of completions.values()) {
+        if (!impressions.has(row.ymid)) continue;
+        const user = users.get(row.userId);
+        if (!user) continue;
+        user.completedVideos++;
+        totals.completedVideos++;
+      }
       const recentUsers = [...users.values()].sort((a, b) => b.lastAt.localeCompare(a.lastAt));
       totals.users = users.size;
       const selected = telegramId ? {
-        ...(users.get(telegramId) || { telegramId, impressions: 0, valuedImpressions: 0, clicks: 0, estimatedUsd: 0, lastAt: null, name: null, username: null }),
+        ...(users.get(telegramId) || { telegramId, impressions: 0, valuedImpressions: 0, completedVideos: 0, clicks: 0, estimatedUsd: 0, lastAt: null, name: null, username: null }),
         totalAds: ads.size,
         ads: [...ads.values()].sort((a, b) => b.at.localeCompare(a.at)).slice(0, limit)
       } : null;

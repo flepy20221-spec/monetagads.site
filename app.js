@@ -5,6 +5,7 @@
   const COOLDOWN_MS = 10000;
   const API_BASE = "https://telegram-webhook-production-aa93.up.railway.app";
   const STORAGE_KEY = "young-money-space-videos-v1";
+  const PENDING_COMPLETIONS_KEY = "young-money-pending-completions-v1";
   const COOLDOWN_KEY = "young-money-ad-cooldown-v1";
   const button = document.getElementById("watch-button");
   const buttonLabel = document.getElementById("button-state-label");
@@ -15,6 +16,8 @@
   let inFlight = false;
   let noticeTimer;
   let memoryState = null;
+  let memoryPending = [];
+  let syncing = false;
   let cooldownUntil = 0;
   let cooldownTimer;
   try {
@@ -44,6 +47,51 @@
     memoryState = state;
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
     catch { /* The UI continues in memory if storage is unavailable. */ }
+  }
+
+  function readPending() {
+    let stored;
+    try { stored = JSON.parse(localStorage.getItem(PENDING_COMPLETIONS_KEY)); }
+    catch { stored = memoryPending; }
+    if (!Array.isArray(stored)) stored = memoryPending;
+    return stored.filter(ymid => typeof ymid === "string" && /^[a-f0-9-]{36}$/i.test(ymid)).slice(-500);
+  }
+
+  function writePending(pending) {
+    memoryPending = pending;
+    try { localStorage.setItem(PENDING_COMPLETIONS_KEY, JSON.stringify(pending)); }
+    catch { /* Retry from memory while this page remains open. */ }
+  }
+
+  function queueCompletion(ymid) {
+    writePending([...new Set([...readPending(), ymid])].slice(-500));
+  }
+
+  async function syncPending() {
+    if (syncing) return;
+    const initData = window.Telegram?.WebApp?.initData;
+    if (!initData) return;
+    syncing = true;
+    try {
+      while (readPending().length) {
+        const ymid = readPending()[0];
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 8000);
+        try {
+          const response = await fetch(`${API_BASE}/api/ad-completions`, {
+            method: "POST",
+            headers: { "content-type": "application/json", "x-telegram-init-data": initData },
+            body: JSON.stringify({ ymid }),
+            cache: "no-store",
+            keepalive: true,
+            signal: controller.signal
+          });
+          if (!response.ok && response.status !== 404) break;
+          writePending(readPending().filter(id => id !== ymid));
+        } catch { break; }
+        finally { clearTimeout(timeout); }
+      }
+    } finally { syncing = false; }
   }
 
   function secondsRemaining() {
@@ -155,7 +203,9 @@
       if (!ymid) return;
       adStarted = true;
       startCooldown(10);
-      await showAd({ type: "end", ymid, requestVar: "daily_video" }); // Zone 11977205.
+      await showAd({ type: "end", ymid, requestVar: "daily_video", catchIfNoFeed: true }); // Zone 11977205.
+      queueCompletion(ymid);
+      void syncPending();
       const latest = readState();
       if (latest.count < DAILY_LIMIT) {
         const next = { day: latest.day, count: latest.count + 1 };
@@ -172,9 +222,15 @@
   });
 
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden && !inFlight) render();
+    if (!document.hidden) {
+      if (!inFlight) render();
+      void syncPending();
+    }
   });
-  window.addEventListener("focus", () => { if (!inFlight) render(); });
+  window.addEventListener("focus", () => {
+    if (!inFlight) render();
+    void syncPending();
+  });
 
   function scheduleMidnightReset() {
     const now = new Date();
@@ -191,6 +247,7 @@
   } catch { /* Also works as a normal mobile site. */ }
 
   render();
+  void syncPending();
   if (secondsRemaining()) scheduleCooldownTimer();
   scheduleMidnightReset();
 })();
