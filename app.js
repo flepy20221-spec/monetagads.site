@@ -2,6 +2,7 @@
   "use strict";
 
   const DAILY_LIMIT = 15;
+  const API_BASE = "https://telegram-webhook-production-aa93.up.railway.app";
   const STORAGE_KEY = "young-money-space-videos-v1";
   const button = document.getElementById("watch-button");
   const buttonLabel = document.getElementById("button-state-label");
@@ -13,8 +14,8 @@
   let noticeTimer;
   let memoryState = null;
 
-  // The visual daily progress is local to this browser. Monetary rewards need
-  // a trusted backend and an ad-network postback before any balance is credited.
+  // The visual daily progress is local; Monetag postbacks are recorded separately
+  // after the Telegram identity is validated on our server.
   function localDay() {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
@@ -77,6 +78,20 @@
     noticeTimer = setTimeout(() => notice.classList.remove("is-visible"), 4200);
   }
 
+  async function prepareAd() {
+    const initData = window.Telegram?.WebApp?.initData;
+    if (!initData) throw new Error("Open the Mini App from Telegram");
+    const response = await fetch(`${API_BASE}/api/ad-attempts`, {
+      method: "POST",
+      headers: { "x-telegram-init-data": initData },
+      cache: "no-store"
+    });
+    if (!response.ok) throw new Error("Could not prepare ad");
+    const { ymid } = await response.json();
+    if (!/^[a-f0-9-]{36}$/i.test(ymid)) throw new Error("Invalid ad identifier");
+    return ymid;
+  }
+
   button.addEventListener("click", async () => {
     if (inFlight) return;
     const state = readState();
@@ -90,8 +105,11 @@
 
     inFlight = true;
     render();
+    let adStarted = false;
     try {
-      await showAd(); // Monetag Rewarded Interstitial: zone 11977205.
+      const ymid = await prepareAd();
+      adStarted = true;
+      await showAd({ type: "end", ymid, requestVar: "daily_video" }); // Zone 11977205.
       const latest = readState();
       if (latest.count < DAILY_LIMIT) {
         const next = { day: latest.day, count: latest.count + 1 };
@@ -99,7 +117,7 @@
         showNotice(`Vídeo concluído! ${next.count} de ${DAILY_LIMIT} hoje.`);
       }
     } catch {
-      showNotice("O vídeo não foi concluído. Tente novamente.", "error");
+      showNotice(adStarted ? "O vídeo não foi concluído. Tente novamente." : "Abra pelo bot no Telegram e tente novamente.", "error");
     } finally {
       inFlight = false;
       render();
