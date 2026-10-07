@@ -82,7 +82,7 @@
     const state = readState();
     if (state.count >= DAILY_LIMIT) { render(); return; }
 
-    const showAd = window.show_11970311;
+    const showAd = window.show_11977205;
     if (typeof showAd !== "function") {
       showNotice("Vídeo indisponível no momento. Tente novamente.", "error");
       return;
@@ -91,7 +91,7 @@
     inFlight = true;
     render();
     try {
-      await showAd(); // Monetag Rewarded Interstitial: zone 11970311.
+      await showAd(); // Monetag Rewarded Interstitial: zone 11977205.
       const latest = readState();
       if (latest.count < DAILY_LIMIT) {
         const next = { day: latest.day, count: latest.count + 1 };
