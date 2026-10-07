@@ -145,6 +145,11 @@ async function createServer({ botToken, webhookSecret, postbackSecret, webAppUrl
           return;
         }
       } catch (error) {
+        if (error.status === 429) {
+          res.setHeader("retry-after", String(error.retryAfterSeconds));
+          reply(res, 429, { ok: false, retryAfterSeconds: error.retryAfterSeconds });
+          return;
+        }
         console.error("Ad ledger failed:", error.message);
         reply(res, 503, { ok: false });
         return;
