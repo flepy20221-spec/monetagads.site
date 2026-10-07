@@ -137,22 +137,52 @@ async function configureTelegramWebhook(botToken, webhookSecret, publicDomain, r
   }
 }
 
-async function configureChatMenu(botToken, request = fetch) {
+async function configureChatMenu(botToken, request = fetch, chatId = null) {
   const endpoint = `https://api.telegram.org/bot${botToken}/`;
+  if (chatId !== null && (!Number.isSafeInteger(chatId) || chatId <= 0)) {
+    throw new Error("Invalid private chat ID");
+  }
   const response = await request(endpoint + "setChatMenuButton", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ menu_button: { type: "commands" } }),
+    body: JSON.stringify({
+      ...(chatId === null ? {} : { chat_id: chatId }),
+      menu_button: { type: "commands" }
+    }),
     signal: AbortSignal.timeout(8000)
   });
   if (!response.ok || !(await response.json()).ok) {
     throw new Error(`Telegram setChatMenuButton failed (${response.status})`);
   }
-  const check = await request(endpoint + "getChatMenuButton", {
+  const checkUrl = new URL(endpoint + "getChatMenuButton");
+  if (chatId !== null) checkUrl.searchParams.set("chat_id", String(chatId));
+  const check = await request(checkUrl, {
     signal: AbortSignal.timeout(8000)
   });
   if (!check.ok || (await check.json()).result?.type !== "commands") {
     throw new Error("Telegram chat menu did not switch to commands");
+  }
+}
+
+async function clearBotDescription(botToken, request = fetch) {
+  const endpoint = `https://api.telegram.org/bot${botToken}/`;
+  for (const languageCode of ["", "pt"]) {
+    const body = { description: "", ...(languageCode ? { language_code: languageCode } : {}) };
+    const response = await request(endpoint + "setMyDescription", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(8000)
+    });
+    if (!response.ok || !(await response.json()).ok) {
+      throw new Error(`Telegram setMyDescription failed (${response.status})`);
+    }
+    const checkUrl = new URL(endpoint + "getMyDescription");
+    if (languageCode) checkUrl.searchParams.set("language_code", languageCode);
+    const check = await request(checkUrl, { signal: AbortSignal.timeout(8000) });
+    if (!check.ok || (await check.json()).result?.description !== "") {
+      throw new Error("Telegram bot description was not cleared");
+    }
   }
 }
 
@@ -188,7 +218,7 @@ function makeMessage(update, webAppUrl, ledger) {
   };
 }
 
-async function createServer({ botToken, webhookSecret, postbackSecret, adminSecret, webAppUrl, dataDir, sendMessage, answerCallback, getTelegramChat, getTelegramPhoto }) {
+async function createServer({ botToken, webhookSecret, postbackSecret, adminSecret, webAppUrl, dataDir, sendMessage, answerCallback, setChatMenu, getTelegramChat, getTelegramPhoto }) {
   if (!botToken || !/^[A-Za-z0-9_-]{16,256}$/.test(webhookSecret || "") ||
       !/^[A-Za-z0-9_-]{32,256}$/.test(postbackSecret || "")) {
     throw new Error("BOT_TOKEN, WEBHOOK_SECRET and MONETAG_POSTBACK_SECRET must be configured");
@@ -200,6 +230,7 @@ async function createServer({ botToken, webhookSecret, postbackSecret, adminSecr
   const allowedOrigin = new URL(appUrl).origin;
   const profileLookupAt = new Map();
   const photoCache = new Map();
+  const menuConfiguredForChat = new Set();
   const pendingLinks = new Map();
   const lookupPhoto = getTelegramPhoto || (userId => fetchTelegramPhoto(botToken, userId));
 
@@ -271,6 +302,7 @@ async function createServer({ botToken, webhookSecret, postbackSecret, adminSecr
       throw new Error(`Telegram answerCallbackQuery failed (${response.status})`);
     }
   });
+  const ensurePrivateMenu = setChatMenu || (chatId => configureChatMenu(botToken, fetch, chatId));
 
   return http.createServer(async (req, res) => {
     const requestUrl = new URL(req.url, "http://localhost");
@@ -464,6 +496,14 @@ async function createServer({ botToken, webhookSecret, postbackSecret, adminSecr
       }
       const from = update?.message?.from;
       if (update?.message?.chat?.type === "private" && Number.isSafeInteger(from?.id) && from.id > 0) {
+        if (!menuConfiguredForChat.has(from.id)) {
+          try {
+            await ensurePrivateMenu(from.id);
+            menuConfiguredForChat.add(from.id);
+          } catch (error) {
+            console.error("Private Telegram chat menu update failed:", error.message);
+          }
+        }
         await ledger.saveProfile(String(from.id), profileFromTelegram(from));
       }
       const linkId = /^\/start(?:@YoungMoneyOFC_bot)? link_([A-Za-z0-9_-]{24})\s*$/i.exec(update?.message?.text || "")?.[1];
@@ -517,7 +557,12 @@ if (require.main === module) {
     }).catch(error => {
       console.error("Telegram chat menu update failed:", error.message);
     });
+    clearBotDescription(process.env.BOT_TOKEN).then(() => {
+      console.log("Telegram bot intro description cleared");
+    }).catch(error => {
+      console.error("Telegram bot intro update failed:", error.message);
+    });
   })).catch(error => { console.error("Startup failed:", error); process.exitCode = 1; });
 }
 
-module.exports = { createServer, makeMessage, verifyInitData, fetchTelegramPhoto, configureTelegramWebhook, configureChatMenu };
+module.exports = { createServer, makeMessage, verifyInitData, fetchTelegramPhoto, configureTelegramWebhook, configureChatMenu, clearBotDescription };

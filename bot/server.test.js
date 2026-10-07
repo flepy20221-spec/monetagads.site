@@ -6,7 +6,7 @@ const crypto = require("node:crypto");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
-const { createServer, fetchTelegramPhoto, configureTelegramWebhook, configureChatMenu } = require("./server");
+const { createServer, fetchTelegramPhoto, configureTelegramWebhook, configureChatMenu, clearBotDescription } = require("./server");
 
 const config = {
   botToken: "test-token",
@@ -16,10 +16,10 @@ const config = {
   webAppUrl: "https://example.com/monetagads.site/"
 };
 
-async function withServer(run, { getTelegramChat = async () => null, getTelegramPhoto, answerCallback } = {}) {
+async function withServer(run, { getTelegramChat = async () => null, getTelegramPhoto, answerCallback, setChatMenu = async () => {} } = {}) {
   const sent = [];
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "young-money-test-"));
-  const server = await createServer({ ...config, dataDir, sendMessage: async message => sent.push(message), answerCallback, getTelegramChat, getTelegramPhoto });
+  const server = await createServer({ ...config, dataDir, sendMessage: async message => sent.push(message), answerCallback, setChatMenu, getTelegramChat, getTelegramPhoto });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   try {
     await run(`http://127.0.0.1:${server.address().port}`, sent, dataDir);
@@ -73,17 +73,40 @@ test("startup registers callback_query updates without discarding pending messag
 test("bot switches the blue Mini App chat button to the normal commands menu", async () => {
   const requests = [];
   await configureChatMenu(config.botToken, async (url, options) => {
-    requests.push(url);
-    if (url.endsWith("/setChatMenuButton")) {
+    requests.push(String(url));
+    if (String(url).endsWith("/setChatMenuButton")) {
       assert.deepEqual(JSON.parse(options.body), { menu_button: { type: "commands" } });
       return new Response(JSON.stringify({ ok: true, result: true }));
     }
     return new Response(JSON.stringify({ ok: true, result: { type: "commands" } }));
   });
   assert.equal(requests.length, 2);
+  await configureChatMenu(config.botToken, async (url, options) => {
+    if (String(url).endsWith("/setChatMenuButton")) {
+      assert.deepEqual(JSON.parse(options.body), { chat_id: 123, menu_button: { type: "commands" } });
+      return new Response(JSON.stringify({ ok: true, result: true }));
+    }
+    assert.equal(new URL(url).searchParams.get("chat_id"), "123");
+    return new Response(JSON.stringify({ ok: true, result: { type: "commands" } }));
+  }, 123);
+});
+
+test("bot clears the chat intro description in default and Portuguese", async () => {
+  const cleared = [];
+  await clearBotDescription(config.botToken, async (url, options) => {
+    if (String(url).endsWith("/setMyDescription")) {
+      const body = JSON.parse(options.body);
+      assert.equal(body.description, "");
+      cleared.push(body.language_code || "default");
+      return new Response(JSON.stringify({ ok: true, result: true }));
+    }
+    return new Response(JSON.stringify({ ok: true, result: { description: "" } }));
+  });
+  assert.deepEqual(cleared, ["default", "pt"]);
 });
 
 test("private /start returns the Mini App button and privacy link", async () => {
+  const menus = [];
   await withServer(async (base, sent) => {
     const response = await fetch(`${base}/telegram/webhook`, {
       method: "POST",
@@ -95,7 +118,8 @@ test("private /start returns the Mini App button and privacy link", async () => 
     assert.equal(sent[0].reply_markup.inline_keyboard[0][0].web_app.url, config.webAppUrl);
     assert.equal(sent[0].reply_markup.inline_keyboard[1][0].url, `${config.webAppUrl}privacy.html`);
     assert.match(sent[0].text, /Olá, Ana Silva!/);
-  });
+    assert.deepEqual(menus, [123]);
+  }, { setChatMenu: async chatId => menus.push(chatId) });
 });
 
 test("ignores group messages and rejects malformed JSON", async () => {
