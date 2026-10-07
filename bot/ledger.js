@@ -15,6 +15,7 @@ async function createLedger(dataDir, now = () => Date.now()) {
   const impressions = new Map();
   const clicks = new Map();
   const completions = new Map();
+  const appLinks = new Map();
   const profiles = new Map();
   const contents = await fs.readFile(file, "utf8").catch(error => {
     if (error.code === "ENOENT") return "";
@@ -34,6 +35,7 @@ async function createLedger(dataDir, now = () => Date.now()) {
     if (row.kind === "impression") impressions.set(row.ymid, row);
     if (row.kind === "click") clicks.set(row.ymid, row);
     if (row.kind === "completion") completions.set(row.ymid, row);
+    if (row.kind === "app_link") appLinks.set(row.tokenHash, row);
     if (row.kind === "profile") profiles.set(row.userId, { name: row.name, username: row.username || null, at: row.at });
   }
   if (contents && !contents.endsWith("\n")) {
@@ -95,6 +97,40 @@ async function createLedger(dataDir, now = () => Date.now()) {
       });
     },
     getProfile(userId) { return profiles.get(userId) || null; },
+    linkApp(tokenHash, userId) {
+      return serialized(async () => {
+        if (appLinks.has(tokenHash)) return false;
+        const row = {
+          kind: "app_link", tokenHash, userId,
+          at: new Date(now()).toISOString(),
+          expiresAt: new Date(now() + 30 * 86400000).toISOString()
+        };
+        await append(row);
+        appLinks.set(tokenHash, row);
+        return true;
+      });
+    },
+    linkedUser(tokenHash) {
+      const link = appLinks.get(tokenHash);
+      return link && Date.parse(link.expiresAt) > now() ? link.userId : null;
+    },
+    dailyVideoProgress(userId) {
+      const formatter = new Intl.DateTimeFormat("en-US", {
+        timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit"
+      });
+      const parts = formatter.formatToParts(new Date(now()));
+      const part = type => parts.find(item => item.type === type).value;
+      const day = `${part("year")}-${part("month")}-${part("day")}`;
+      let completed = 0;
+      for (const row of completions.values()) {
+        if (row.userId !== userId || !impressions.has(row.ymid)) continue;
+        const completedAt = new Date(row.at);
+        const finished = formatter.formatToParts(completedAt);
+        const value = type => finished.find(item => item.type === type).value;
+        if (`${value("year")}-${value("month")}-${value("day")}` === day) completed++;
+      }
+      return { day, completed: Math.min(completed, 15), goal: 15 };
+    },
     recordCompletion(userId, ymid) {
       return serialized(async () => {
         const attempt = attempts.get(ymid);

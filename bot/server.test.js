@@ -16,10 +16,10 @@ const config = {
   webAppUrl: "https://example.com/monetagads.site/"
 };
 
-async function withServer(run, { getTelegramChat = async () => null, getTelegramPhoto } = {}) {
+async function withServer(run, { getTelegramChat = async () => null, getTelegramPhoto, answerCallback } = {}) {
   const sent = [];
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "young-money-test-"));
-  const server = await createServer({ ...config, dataDir, sendMessage: async message => sent.push(message), getTelegramChat, getTelegramPhoto });
+  const server = await createServer({ ...config, dataDir, sendMessage: async message => sent.push(message), answerCallback, getTelegramChat, getTelegramPhoto });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   try {
     await run(`http://127.0.0.1:${server.address().port}`, sent, dataDir);
@@ -220,6 +220,58 @@ test("video total counts one signed SDK completion only after a Monetag impressi
     assert.equal(reloaded.selected.completedVideos, 1);
     await new Promise(resolve => restarted.close(resolve));
   });
+});
+
+test("Telegram callback confirms the app link and exposes only today's paired completions", async () => {
+  const answers = [];
+  await withServer(async (base, sent, dataDir) => {
+    const created = await fetch(`${base}/api/app-links`, { method: "POST" });
+    assert.equal(created.status, 201);
+    const { token, url } = await created.json();
+    const id = new URL(url).searchParams.get("start").slice("link_".length);
+    const statusUrl = `${base}/api/app-links/status`;
+    const auth = { authorization: `Bearer ${token}` };
+    assert.equal((await fetch(statusUrl)).status, 401);
+    assert.deepEqual(await (await fetch(statusUrl, { headers: auth })).json(), { state: "pending" });
+    const webhook = payload => fetch(`${base}/telegram/webhook`, {
+      method: "POST", headers: { "x-telegram-bot-api-secret-token": config.webhookSecret },
+      body: JSON.stringify(payload)
+    });
+    await webhook({ message: { chat: { id: 123, type: "private" }, from: { id: 123, first_name: "Ana" }, text: `/start link_${id}` } });
+    assert.equal(sent[0].reply_markup.inline_keyboard[0][0].callback_data, `connect:${id}`);
+    assert.equal((await (await fetch(statusUrl, { headers: auth })).json()).state, "pending");
+    await webhook({ callback_query: { id: "bad", data: `connect:${id}`, from: { id: 456 }, message: { chat: { id: 123, type: "private" } } } });
+    assert.equal((await (await fetch(statusUrl, { headers: auth })).json()).state, "pending");
+    await webhook({ callback_query: { id: "good", data: `connect:${id}`, from: { id: 123, first_name: "Ana" }, message: { chat: { id: 123, type: "private" } } } });
+    assert.equal(answers.at(-1).text.startsWith("Conta vinculada"), true);
+    let progress = await (await fetch(statusUrl, { headers: auth })).json();
+    assert.equal(progress.state, "linked");
+    assert.equal(progress.completed, 0);
+    assert.equal(progress.goal, 15);
+
+    const headers = { origin: "https://example.com", "x-telegram-init-data": initData(123) };
+    const { ymid } = await (await fetch(`${base}/api/ad-attempts`, { method: "POST", headers })).json();
+    await fetch(`${base}/api/ad-completions`, {
+      method: "POST", headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({ ymid })
+    });
+    progress = await (await fetch(statusUrl, { headers: auth })).json();
+    assert.equal(progress.completed, 0);
+    const postback = new URL(`${base}/monetag/postback`);
+    Object.entries({ key: config.postbackSecret, ymid, event: "impression", value: "valued", zone: "11977205", telegram_id: "123", source: "daily_video", price: "0.001" })
+      .forEach(([key, value]) => postback.searchParams.set(key, value));
+    await fetch(postback);
+    progress = await (await fetch(statusUrl, { headers: auth })).json();
+    assert.equal(progress.completed, 1);
+    assert.match(progress.day, /^\d{4}-\d\d-\d\d$/);
+    assert.equal((await fetch(statusUrl, { headers: { authorization: `Bearer ${"a".repeat(43)}` } })).status, 401);
+
+    const restarted = await createServer({ ...config, dataDir, sendMessage: async () => {}, answerCallback: async () => {} });
+    await new Promise(resolve => restarted.listen(0, "127.0.0.1", resolve));
+    const persisted = await (await fetch(`http://127.0.0.1:${restarted.address().port}/api/app-links/status`, { headers: auth })).json();
+    assert.equal(persisted.completed, 1);
+    await new Promise(resolve => restarted.close(resolve));
+  }, { answerCallback: async answer => answers.push(answer) });
 });
 
 test("old Telegram IDs receive a cached name from getChat without changing their ads", async () => {

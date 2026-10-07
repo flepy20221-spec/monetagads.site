@@ -135,7 +135,7 @@ function makeMessage(update, webAppUrl, ledger) {
   };
 }
 
-async function createServer({ botToken, webhookSecret, postbackSecret, adminSecret, webAppUrl, dataDir, sendMessage, getTelegramChat, getTelegramPhoto }) {
+async function createServer({ botToken, webhookSecret, postbackSecret, adminSecret, webAppUrl, dataDir, sendMessage, answerCallback, getTelegramChat, getTelegramPhoto }) {
   if (!botToken || !/^[A-Za-z0-9_-]{16,256}$/.test(webhookSecret || "") ||
       !/^[A-Za-z0-9_-]{32,256}$/.test(postbackSecret || "")) {
     throw new Error("BOT_TOKEN, WEBHOOK_SECRET and MONETAG_POSTBACK_SECRET must be configured");
@@ -147,7 +147,13 @@ async function createServer({ botToken, webhookSecret, postbackSecret, adminSecr
   const allowedOrigin = new URL(appUrl).origin;
   const profileLookupAt = new Map();
   const photoCache = new Map();
+  const pendingLinks = new Map();
   const lookupPhoto = getTelegramPhoto || (userId => fetchTelegramPhoto(botToken, userId));
+
+  function linkTokenHash(req) {
+    const match = /^Bearer ([A-Za-z0-9_-]{43})$/.exec(req.headers.authorization || "");
+    return match ? crypto.createHash("sha256").update(match[1]).digest("hex") : null;
+  }
 
   async function cachedPhoto(userId) {
     const cached = photoCache.get(userId);
@@ -201,11 +207,51 @@ async function createServer({ botToken, webhookSecret, postbackSecret, adminSecr
       throw new Error(`Telegram sendMessage failed (${response.status})`);
     }
   });
+  const acknowledge = answerCallback || (async payload => {
+    const response = await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(8000)
+    });
+    if (!response.ok || !(await response.json()).ok) {
+      throw new Error(`Telegram answerCallbackQuery failed (${response.status})`);
+    }
+  });
 
   return http.createServer(async (req, res) => {
     const requestUrl = new URL(req.url, "http://localhost");
     if (req.method === "GET" && requestUrl.pathname === "/health") {
       reply(res, 200, { ok: true });
+      return;
+    }
+    if (requestUrl.pathname === "/api/app-links" && req.method === "POST") {
+      // Only a Telegram callback can bind this opaque token to an account.
+      for (const [id, link] of pendingLinks) {
+        if (link.expiresAt <= Date.now()) pendingLinks.delete(id);
+      }
+      if (pendingLinks.size >= 300) { reply(res, 429, { ok: false }); return; }
+      const id = crypto.randomBytes(18).toString("base64url");
+      const token = crypto.randomBytes(32).toString("base64url");
+      pendingLinks.set(id, {
+        tokenHash: crypto.createHash("sha256").update(token).digest("hex"),
+        expiresAt: Date.now() + 10 * 60000
+      });
+      reply(res, 201, { token, url: `https://t.me/YoungMoneyOFC_bot?start=link_${id}` });
+      return;
+    }
+    if (requestUrl.pathname === "/api/app-links/status" && req.method === "GET") {
+      const tokenHash = linkTokenHash(req);
+      if (!tokenHash) { reply(res, 401, { ok: false }); return; }
+      const userId = ledger.linkedUser(tokenHash);
+      if (userId) {
+        reply(res, 200, { state: "linked", ...ledger.dailyVideoProgress(userId) });
+        return;
+      }
+      const pending = [...pendingLinks.values()].some(
+        entry => entry.tokenHash === tokenHash && entry.expiresAt > Date.now()
+      );
+      reply(res, pending ? 200 : 401, pending ? { state: "pending" } : { ok: false });
       return;
     }
     if (requestUrl.pathname === "/admin/telegram-photo") {
@@ -341,9 +387,47 @@ async function createServer({ botToken, webhookSecret, postbackSecret, adminSecr
     }
     try {
       const update = await readJson(req);
+      const callback = update?.callback_query;
+      if (callback && typeof callback.id === "string") {
+        const match = /^connect:([A-Za-z0-9_-]{24})$/.exec(callback.data || "");
+        const userId = callback.from?.id;
+        const isPrivate = callback.message?.chat?.type === "private" &&
+          callback.message.chat.id === userId && Number.isSafeInteger(userId) && userId > 0;
+        const link = isPrivate && match ? pendingLinks.get(match[1]) : null;
+        const active = link && link.expiresAt > Date.now();
+        if (active) {
+          await ledger.linkApp(link.tokenHash, String(userId));
+          pendingLinks.delete(match[1]);
+          await ledger.saveProfile(String(userId), profileFromTelegram(callback.from));
+        }
+        await acknowledge({
+          callback_query_id: callback.id,
+          text: active ? "Conta vinculada. Volte ao aplicativo Young Money." : "Vínculo expirado. Abra o aplicativo para gerar outro.",
+          show_alert: !active
+        });
+        if (active) await send({ chat_id: userId, text: "Sua conta Telegram foi vinculada ao card Mini App. O card mostra os vídeos de hoje e não dá pontos. Abra a Mini App para assistir aos vídeos.", reply_markup: { inline_keyboard: [[{ text: "🚀 Abrir Mini App", web_app: { url: appUrl } }]] } });
+        reply(res, 200, { ok: true });
+        return;
+      }
       const from = update?.message?.from;
       if (update?.message?.chat?.type === "private" && Number.isSafeInteger(from?.id) && from.id > 0) {
         await ledger.saveProfile(String(from.id), profileFromTelegram(from));
+      }
+      const linkId = /^\/start(?:@YoungMoneyOFC_bot)? link_([A-Za-z0-9_-]{24})\s*$/i.exec(update?.message?.text || "")?.[1];
+      if (linkId && update?.message?.chat?.type === "private" &&
+          update.message.chat.id === from?.id) {
+        const link = pendingLinks.get(linkId);
+        if (link && link.expiresAt > Date.now()) {
+          await send({
+            chat_id: from.id,
+            text: "Vincular o progresso dos vídeos do Telegram ao aplicativo Young Money neste dispositivo? O card mostrará sua contagem diária de até 15 vídeos. Essa ação não concede pontos.",
+            reply_markup: { inline_keyboard: [[{ text: "Vincular meu progresso", callback_data: `connect:${linkId}` }]] }
+          });
+        } else {
+          await send({ chat_id: from.id, text: "Esse vínculo expirou. Volte ao aplicativo Young Money e toque no card Mini App novamente." });
+        }
+        reply(res, 200, { ok: true });
+        return;
       }
       const message = makeMessage(update, appUrl, ledger);
       if (message) await send(message);

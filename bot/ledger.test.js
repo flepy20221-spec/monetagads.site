@@ -28,3 +28,20 @@ test("10-second cooldown is per user, expires, and survives restart", async () =
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
+
+test("Mini App progress resets at midnight in Sao Paulo, counting only confirmed videos", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "young-money-daily-"));
+  let time = Date.parse("2026-10-08T02:59:30.000Z");
+  try {
+    const ledger = await createLedger(dir, () => time);
+    const ymid = await ledger.createAttempt("123");
+    await ledger.recordCompletion("123", ymid);
+    assert.deepEqual(ledger.dailyVideoProgress("123"), { day: "2026-10-07", completed: 0, goal: 15 });
+    await ledger.recordAdEvent({ ymid, userId: "123", event: "impression", valued: true, price: 0.001, zone: "11977205", source: "daily_video" });
+    assert.equal(ledger.dailyVideoProgress("123").completed, 1);
+    time += 60000;
+    assert.deepEqual(ledger.dailyVideoProgress("123"), { day: "2026-10-08", completed: 0, goal: 15 });
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
