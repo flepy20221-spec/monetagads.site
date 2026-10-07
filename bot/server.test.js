@@ -82,6 +82,10 @@ test("signed user attempt links a valued impression once; click and wrong user d
     const attempt = await fetch(`${base}/api/ad-attempts`, { method: "POST", headers });
     assert.equal(attempt.status, 201);
     const { ymid } = await attempt.json();
+    const rapidRepeat = await fetch(`${base}/api/ad-attempts`, { method: "POST", headers });
+    assert.equal(rapidRepeat.status, 429);
+    assert.equal(rapidRepeat.headers.get("retry-after"), "10");
+    assert.equal((await rapidRepeat.json()).retryAfterSeconds, 10);
     const url = new URL(`${base}/monetag/postback`);
     Object.entries({ key: config.postbackSecret, ymid, event: "impression", value: "valued", zone: "11977205", telegram_id: "123", source: "daily_video", price: "0.003700" }).forEach(([k, v]) => url.searchParams.set(k, v));
     assert.equal((await fetch(url.toString().replace(config.postbackSecret, "bad"))).status, 403);
