@@ -1,0 +1,87 @@
+"use strict";
+
+const crypto = require("node:crypto");
+const fs = require("node:fs/promises");
+const path = require("node:path");
+
+// One Railway replica owns this append-only file on its persistent volume.
+// Writes are serialized and synced before a Monetag postback is acknowledged.
+async function createLedger(dataDir) {
+  if (!dataDir) throw new Error("DATA_DIR must point to a persistent volume");
+  await fs.mkdir(dataDir, { recursive: true });
+  const file = path.join(dataDir, "ad-events.jsonl");
+  const attempts = new Map();
+  const impressions = new Map();
+  const contents = await fs.readFile(file, "utf8").catch(error => {
+    if (error.code === "ENOENT") return "";
+    throw error;
+  });
+  const lines = contents.split("\n");
+  // A crash can leave an unfinished last line. It must not become an event.
+  const complete = contents.endsWith("\n") ? lines : lines.slice(0, -1);
+  for (const line of complete) {
+    if (!line) continue;
+    const row = JSON.parse(line);
+    if (row.kind === "attempt") attempts.set(row.ymid, row);
+    if (row.kind === "impression") impressions.set(row.ymid, row);
+  }
+  if (contents && !contents.endsWith("\n")) {
+    await fs.truncate(file, Buffer.byteLength(complete.join("\n") + "\n"));
+  }
+
+  let tail = Promise.resolve();
+  function serialized(action) {
+    const task = tail.then(action);
+    tail = task.catch(() => {});
+    return task;
+  }
+  async function append(row) {
+    const handle = await fs.open(file, "a");
+    try {
+      await handle.writeFile(JSON.stringify(row) + "\n");
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+  }
+  return {
+    createAttempt(userId) {
+      return serialized(async () => {
+        const row = { kind: "attempt", ymid: crypto.randomUUID(), userId, at: new Date().toISOString() };
+        await append(row);
+        attempts.set(row.ymid, row);
+        return row.ymid;
+      });
+    },
+    recordImpression({ ymid, userId, valued, price, zone, sub, source }) {
+      return serialized(async () => {
+        const attempt = attempts.get(ymid);
+        if (!attempt || (userId && userId !== attempt.userId)) return "ignored";
+        if (impressions.has(ymid)) return "duplicate";
+        const row = {
+          kind: "impression", ymid, userId: attempt.userId, valued,
+          price, zone, sub, source, at: new Date().toISOString()
+        };
+        await append(row);
+        impressions.set(ymid, row);
+        return "recorded";
+      });
+    },
+    counts(userId) {
+      const today = new Date().toISOString().slice(0, 10);
+      const result = { today, total: 0, valued: 0, todayTotal: 0, todayValued: 0 };
+      for (const row of impressions.values()) {
+        if (row.userId !== userId) continue;
+        result.total++;
+        if (row.valued) result.valued++;
+        if (row.at.slice(0, 10) === today) {
+          result.todayTotal++;
+          if (row.valued) result.todayValued++;
+        }
+      }
+      return result;
+    }
+  };
+}
+
+module.exports = { createLedger };
