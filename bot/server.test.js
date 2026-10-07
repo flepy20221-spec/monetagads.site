@@ -12,6 +12,7 @@ const config = {
   botToken: "test-token",
   webhookSecret: "a-secure-example-secret",
   postbackSecret: "example-postback-secret-long-enough-123",
+  adminSecret: "example-admin-secret-long-enough-12345",
   webAppUrl: "https://example.com/monetagads.site/"
 };
 
@@ -74,7 +75,7 @@ test("ignores group messages and rejects malformed JSON", async () => {
   });
 });
 
-test("signed user attempt links a valued impression once; click and wrong user do not count", async () => {
+test("signed user attempt links priced impression and click once, with a private admin report", async () => {
   await withServer(async (base, sent, dataDir) => {
     const headers = { origin: "https://example.com", "x-telegram-init-data": initData(123) };
     assert.equal((await fetch(`${base}/api/ad-attempts`, { method: "POST", headers: { ...headers, "x-telegram-init-data": "forged" } })).status, 401);
@@ -93,7 +94,8 @@ test("signed user attempt links a valued impression once; click and wrong user d
     assert.equal((await (await fetch(url)).json()).result, "ignored");
     url.searchParams.set("telegram_id", "123");
     url.searchParams.set("event", "click");
-    assert.equal((await (await fetch(url)).json()).result, "click_ignored");
+    assert.equal((await (await fetch(url)).json()).result, "recorded");
+    assert.equal((await (await fetch(url)).json()).result, "duplicate");
     url.searchParams.set("event", "impression");
     assert.equal((await (await fetch(url)).json()).result, "recorded");
     assert.equal((await (await fetch(url)).json()).result, "duplicate");
@@ -102,6 +104,32 @@ test("signed user attempt links a valued impression once; click and wrong user d
     assert.equal(counts.valued, 1);
     const other = await (await fetch(`${base}/api/impressions`, { headers: { ...headers, "x-telegram-init-data": initData(456) } })).json();
     assert.equal(other.total, 0);
+    assert.equal((await fetch(`${base}/admin/monetag`)).status, 403);
+    const adminHeaders = { authorization: `Bearer ${config.adminSecret}` };
+    const reportResponse = await fetch(`${base}/admin/monetag?telegram_id=123`, { headers: adminHeaders });
+    assert.equal(reportResponse.status, 200);
+    const report = await reportResponse.json();
+    assert.equal(report.currency, "USD");
+    assert.equal(report.totals.impressions, 1);
+    assert.equal(report.totals.clicks, 1);
+    assert.equal(report.totals.users, 1);
+    assert.equal(report.selected.telegramId, "123");
+    assert.equal(report.selected.totalAds, 1);
+    assert.equal(report.selected.ads[0].ymid, ymid);
+    assert.equal(report.selected.ads[0].estimatedUsd, 0.0074);
+    assert.equal((await fetch(`${base}/admin/monetag?limit=101`, { headers: adminHeaders })).status, 400);
+    const secondAttempt = await fetch(`${base}/api/ad-attempts`, {
+      method: "POST", headers: { ...headers, "x-telegram-init-data": initData(456) }
+    });
+    const { ymid: secondYmid } = await secondAttempt.json();
+    url.searchParams.set("ymid", secondYmid);
+    url.searchParams.set("telegram_id", "456");
+    url.searchParams.set("value", "non_valued");
+    url.searchParams.set("price", "0.5");
+    assert.equal((await (await fetch(url)).json()).result, "recorded");
+    const unpaid = await (await fetch(`${base}/admin/monetag?telegram_id=456`, { headers: adminHeaders })).json();
+    assert.equal(unpaid.totals.estimatedUsd, 0.0074);
+    assert.equal(unpaid.selected.estimatedUsd, 0);
     const status = await fetch(`${base}/telegram/webhook`, {
       method: "POST", headers: { "x-telegram-bot-api-secret-token": config.webhookSecret },
       body: JSON.stringify({ message: { chat: { id: 123, type: "private" }, from: { id: 123 }, text: "/status" } })
@@ -113,6 +141,8 @@ test("signed user attempt links a valued impression once; click and wrong user d
     await new Promise(resolve => restarted.listen(0, "127.0.0.1", resolve));
     const reloadedCounts = await (await fetch(`http://127.0.0.1:${restarted.address().port}/api/impressions`, { headers })).json();
     assert.equal(reloadedCounts.total, 1);
+    const reloadedReport = await (await fetch(`http://127.0.0.1:${restarted.address().port}/admin/monetag?telegram_id=123`, { headers: adminHeaders })).json();
+    assert.equal(reloadedReport.selected.ads[0].estimatedUsd, 0.0074);
     await new Promise(resolve => restarted.close(resolve));
   });
 });

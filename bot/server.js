@@ -94,7 +94,7 @@ function makeMessage(update, webAppUrl, ledger) {
   };
 }
 
-async function createServer({ botToken, webhookSecret, postbackSecret, webAppUrl, dataDir, sendMessage }) {
+async function createServer({ botToken, webhookSecret, postbackSecret, adminSecret, webAppUrl, dataDir, sendMessage }) {
   if (!botToken || !/^[A-Za-z0-9_-]{16,256}$/.test(webhookSecret || "") ||
       !/^[A-Za-z0-9_-]{32,256}$/.test(postbackSecret || "")) {
     throw new Error("BOT_TOKEN, WEBHOOK_SECRET and MONETAG_POSTBACK_SECRET must be configured");
@@ -121,6 +121,25 @@ async function createServer({ botToken, webhookSecret, postbackSecret, webAppUrl
     const requestUrl = new URL(req.url, "http://localhost");
     if (req.method === "GET" && requestUrl.pathname === "/health") {
       reply(res, 200, { ok: true });
+      return;
+    }
+    if (requestUrl.pathname === "/admin/monetag") {
+      if (req.method !== "GET") { reply(res, 405, { ok: false }); return; }
+      if (!adminSecret || !/^[A-Za-z0-9_-]{32,256}$/.test(adminSecret)) {
+        reply(res, 503, { ok: false }); return;
+      }
+      if (!secureEqual(req.headers.authorization, `Bearer ${adminSecret}`)) {
+        reply(res, 403, { ok: false }); return;
+      }
+      const telegramId = requestUrl.searchParams.get("telegram_id") || "";
+      const limitText = requestUrl.searchParams.get("limit") || "100";
+      if (requestUrl.searchParams.getAll("telegram_id").length > 1 ||
+          requestUrl.searchParams.getAll("limit").length > 1 ||
+          (telegramId && !/^\d{1,16}$/.test(telegramId)) ||
+          !/^(?:[1-9]|[1-9]\d|100)$/.test(limitText)) {
+        reply(res, 400, { ok: false }); return;
+      }
+      reply(res, 200, ledger.report(telegramId, Number(limitText)));
       return;
     }
     if (requestUrl.pathname === "/api/ad-attempts" || requestUrl.pathname === "/api/impressions") {
@@ -177,10 +196,9 @@ async function createServer({ botToken, webhookSecret, postbackSecret, webAppUrl
           !/^\d+(?:\.\d+)?$/.test(priceText) || !Number.isFinite(Number(priceText))) {
         reply(res, 400, { ok: false }); return;
       }
-      if (event === "click") { reply(res, 200, { ok: true, result: "click_ignored" }); return; }
       try {
-        const result = await ledger.recordImpression({
-          ymid, userId, valued: value === "valued", price: Number(priceText), zone, sub, source
+        const result = await ledger.recordAdEvent({
+          ymid, userId, event, valued: value === "valued", price: Number(priceText), zone, sub, source
         });
         reply(res, 200, { ok: true, result });
       } catch (error) {
@@ -215,6 +233,7 @@ if (require.main === module) {
     botToken: process.env.BOT_TOKEN,
     webhookSecret: process.env.WEBHOOK_SECRET,
     postbackSecret: process.env.MONETAG_POSTBACK_SECRET,
+    adminSecret: process.env.MONETAG_ADMIN_SECRET,
     webAppUrl: process.env.WEBAPP_URL,
     dataDir: process.env.DATA_DIR
   }).then(server => server.listen(Number(process.env.PORT || 3000), "0.0.0.0", () => {
