@@ -1,0 +1,11 @@
+{
+  "name": "young-money-telegram-bot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Telegram webhook for the Young Money Mini App",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  }
+}
