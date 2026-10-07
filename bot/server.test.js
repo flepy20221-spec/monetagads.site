@@ -6,7 +6,7 @@ const crypto = require("node:crypto");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
-const { createServer } = require("./server");
+const { createServer, fetchTelegramPhoto } = require("./server");
 
 const config = {
   botToken: "test-token",
@@ -16,10 +16,10 @@ const config = {
   webAppUrl: "https://example.com/monetagads.site/"
 };
 
-async function withServer(run, { getTelegramChat = async () => null } = {}) {
+async function withServer(run, { getTelegramChat = async () => null, getTelegramPhoto } = {}) {
   const sent = [];
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "young-money-test-"));
-  const server = await createServer({ ...config, dataDir, sendMessage: async message => sent.push(message), getTelegramChat });
+  const server = await createServer({ ...config, dataDir, sendMessage: async message => sent.push(message), getTelegramChat, getTelegramPhoto });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   try {
     await run(`http://127.0.0.1:${server.address().port}`, sent, dataDir);
@@ -113,6 +113,8 @@ test("signed user attempt links priced impression and click once, with a private
     assert.equal(report.totals.impressions, 1);
     assert.equal(report.totals.clicks, 1);
     assert.equal(report.totals.users, 1);
+    assert.equal(report.dailyRevenue.length, 30);
+    assert.equal(report.dailyRevenue.at(-1).estimatedUsd, report.totals.todayEstimatedUsd);
     assert.equal(report.selected.telegramId, "123");
     assert.equal(report.selected.name, "Ana Silva");
     assert.equal(report.selected.username, "ana_silva");
@@ -148,6 +150,38 @@ test("signed user attempt links priced impression and click once, with a private
     assert.equal(reloadedReport.selected.name, "Ana Silva");
     await new Promise(resolve => restarted.close(resolve));
   });
+});
+
+test("admin photo endpoint serves a small Telegram thumbnail without exposing the bot token", async () => {
+  const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
+  const requested = [];
+  const photo = await fetchTelegramPhoto(config.botToken, "123", async url => {
+    const parsed = new URL(url);
+    requested.push(parsed.pathname);
+    if (parsed.pathname.endsWith("/getUserProfilePhotos")) {
+      assert.equal(parsed.searchParams.get("user_id"), "123");
+      return new Response(JSON.stringify({ ok: true, result: { photos: [[{ file_id: "small", file_size: 4 }]] } }));
+    }
+    if (parsed.pathname.endsWith("/getFile")) {
+      return new Response(JSON.stringify({ ok: true, result: { file_path: "photos/thumb.jpg", file_size: 4 } }));
+    }
+    return new Response(jpeg, { headers: { "content-type": "image/jpeg" } });
+  });
+  assert.deepEqual(photo.bytes, jpeg);
+  assert.equal(requested.length, 3);
+
+  let photoLookups = 0;
+  await withServer(async base => {
+    assert.equal((await fetch(`${base}/admin/telegram-photo?telegram_id=123`)).status, 403);
+    const headers = { authorization: `Bearer ${config.adminSecret}` };
+    assert.equal((await fetch(`${base}/admin/telegram-photo?telegram_id=abc`, { headers })).status, 400);
+    const response = await fetch(`${base}/admin/telegram-photo?telegram_id=123`, { headers });
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("content-type"), "image/jpeg");
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), jpeg);
+    await fetch(`${base}/admin/telegram-photo?telegram_id=123`, { headers });
+    assert.equal(photoLookups, 1);
+  }, { getTelegramPhoto: async id => { photoLookups++; assert.equal(id, "123"); return photo; } });
 });
 
 test("old Telegram IDs receive a cached name from getChat without changing their ads", async () => {

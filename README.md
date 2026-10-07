@@ -18,4 +18,6 @@ O painel administrativo consulta `GET /admin/monetag` no serviço do bot com `Au
 
 O relatório mostra o nome e o `@username` associados ao Telegram ID quando informados pelo `initData` assinado ou por mensagens privadas do bot. Para IDs anteriores à coleta de perfil, o bot tenta completar o nome uma vez a partir de `getChat` e o armazena no mesmo volume; se o chat estiver inacessível, o painel indica que o nome está indisponível. As consultas são limitadas e cacheadas para evitar requisições repetidas à API do Telegram.
 
+O relatório inclui receita diária estimada dos últimos 30 dias (UTC) para o gráfico do painel. A consulta autenticada `GET /admin/telegram-photo?telegram_id=...` carrega uma miniatura pela Bot API e a mantém em cache temporário; o painel entrega a imagem somente para administradores autenticados, sem expor o token do bot no navegador. Quando não há foto acessível, a interface usa a inicial do nome.
+
 A [política de privacidade](privacy.html) da Mini App fica na mesma hospedagem estática. O botão de menu, os comandos e os textos do perfil do bot são configurados na API do Telegram. O destaque **Main Mini App** e o link da política no perfil são opções do `@BotFather` gerenciadas pelo dono do bot.

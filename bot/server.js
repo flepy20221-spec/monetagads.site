@@ -5,6 +5,7 @@ const crypto = require("node:crypto");
 const { createLedger } = require("./ledger");
 
 const MAX_BODY_BYTES = 64 * 1024;
+const MAX_AVATAR_BYTES = 256 * 1024;
 
 function secureEqual(actual, expected) {
   if (typeof actual !== "string" || typeof expected !== "string") return false;
@@ -26,6 +27,36 @@ function profileFromTelegram(user) {
   const name = [clean(user.first_name), clean(user.last_name)].filter(Boolean).join(" ").slice(0, 160)
     || (username ? `@${username}` : "");
   return name ? { name, username } : null;
+}
+
+async function fetchTelegramPhoto(botToken, userId, request = fetch) {
+  const signal = AbortSignal.timeout(6500);
+  const photosUrl = new URL(`https://api.telegram.org/bot${botToken}/getUserProfilePhotos`);
+  photosUrl.searchParams.set("user_id", userId);
+  photosUrl.searchParams.set("limit", "1");
+  const photosResponse = await request(photosUrl, { signal });
+  if (!photosResponse.ok) return null;
+  const photos = await photosResponse.json();
+  const thumbnail = photos.ok && photos.result?.photos?.[0]?.[0];
+  if (!thumbnail?.file_id || thumbnail.file_size > MAX_AVATAR_BYTES) return null;
+
+  const fileUrl = new URL(`https://api.telegram.org/bot${botToken}/getFile`);
+  fileUrl.searchParams.set("file_id", thumbnail.file_id);
+  const fileResponse = await request(fileUrl, { signal });
+  if (!fileResponse.ok) return null;
+  const file = await fileResponse.json();
+  const filePath = file.ok && file.result?.file_path;
+  if (!filePath || !/^[A-Za-z0-9_./-]+$/.test(filePath) ||
+      filePath.split("/").includes("..") || file.result.file_size > MAX_AVATAR_BYTES) return null;
+
+  const download = await request(`https://api.telegram.org/file/bot${botToken}/${filePath}`, { signal });
+  if (!download.ok || Number(download.headers.get("content-length")) > MAX_AVATAR_BYTES) return null;
+  const bytes = Buffer.from(await download.arrayBuffer());
+  if (bytes.length > MAX_AVATAR_BYTES) return null;
+  const contentType = bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
+    ? "image/jpeg" : bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from("89504e470d0a1a0a", "hex"))
+      ? "image/png" : null;
+  return contentType ? { bytes, contentType } : null;
 }
 
 function verifyInitData(raw, botToken, now = Date.now()) {
@@ -104,7 +135,7 @@ function makeMessage(update, webAppUrl, ledger) {
   };
 }
 
-async function createServer({ botToken, webhookSecret, postbackSecret, adminSecret, webAppUrl, dataDir, sendMessage, getTelegramChat }) {
+async function createServer({ botToken, webhookSecret, postbackSecret, adminSecret, webAppUrl, dataDir, sendMessage, getTelegramChat, getTelegramPhoto }) {
   if (!botToken || !/^[A-Za-z0-9_-]{16,256}$/.test(webhookSecret || "") ||
       !/^[A-Za-z0-9_-]{32,256}$/.test(postbackSecret || "")) {
     throw new Error("BOT_TOKEN, WEBHOOK_SECRET and MONETAG_POSTBACK_SECRET must be configured");
@@ -115,6 +146,19 @@ async function createServer({ botToken, webhookSecret, postbackSecret, adminSecr
   const ledger = await createLedger(dataDir);
   const allowedOrigin = new URL(appUrl).origin;
   const profileLookupAt = new Map();
+  const photoCache = new Map();
+  const lookupPhoto = getTelegramPhoto || (userId => fetchTelegramPhoto(botToken, userId));
+
+  async function cachedPhoto(userId) {
+    const cached = photoCache.get(userId);
+    if (cached && cached.expires > Date.now()) return cached.value;
+    try {
+      const value = await lookupPhoto(userId);
+      if (photoCache.size >= 200) photoCache.delete(photoCache.keys().next().value);
+      photoCache.set(userId, { value, expires: Date.now() + (value ? 21600000 : 3600000) });
+      return value;
+    } catch { return null; }
+  }
 
   const lookupChat = getTelegramChat || (async userId => {
     const endpoint = new URL(`https://api.telegram.org/bot${botToken}/getChat`);
@@ -162,6 +206,27 @@ async function createServer({ botToken, webhookSecret, postbackSecret, adminSecr
     const requestUrl = new URL(req.url, "http://localhost");
     if (req.method === "GET" && requestUrl.pathname === "/health") {
       reply(res, 200, { ok: true });
+      return;
+    }
+    if (requestUrl.pathname === "/admin/telegram-photo") {
+      if (req.method !== "GET") { reply(res, 405, { ok: false }); return; }
+      if (!adminSecret || !/^[A-Za-z0-9_-]{32,256}$/.test(adminSecret)) {
+        reply(res, 503, { ok: false }); return;
+      }
+      if (!secureEqual(req.headers.authorization, `Bearer ${adminSecret}`)) {
+        reply(res, 403, { ok: false }); return;
+      }
+      const userId = requestUrl.searchParams.get("telegram_id");
+      if (requestUrl.searchParams.getAll("telegram_id").length !== 1 || !/^\d{1,16}$/.test(userId || "")) {
+        reply(res, 400, { ok: false }); return;
+      }
+      const photo = await cachedPhoto(userId);
+      if (!photo) { reply(res, 404, { ok: false }); return; }
+      res.writeHead(200, {
+        "content-type": photo.contentType, "content-length": photo.bytes.length,
+        "cache-control": "private, max-age=3600", "x-content-type-options": "nosniff"
+      });
+      res.end(photo.bytes);
       return;
     }
     if (requestUrl.pathname === "/admin/monetag") {
@@ -288,4 +353,4 @@ if (require.main === module) {
   })).catch(error => { console.error("Startup failed:", error); process.exitCode = 1; });
 }
 
-module.exports = { createServer, makeMessage, verifyInitData };
+module.exports = { createServer, makeMessage, verifyInitData, fetchTelegramPhoto };

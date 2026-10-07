@@ -111,6 +111,10 @@ async function createLedger(dataDir, now = () => Date.now()) {
     report(telegramId = "", limit = 100) {
       const today = new Date(now()).toISOString().slice(0, 10);
       const totals = { impressions: 0, valuedImpressions: 0, clicks: 0, estimatedUsd: 0, todayEstimatedUsd: 0, users: 0 };
+      const firstDay = Date.parse(`${today}T00:00:00.000Z`) - 29 * 86400000;
+      const dailyRevenue = new Map(Array.from({ length: 30 }, (_, index) => [
+        new Date(firstDay + index * 86400000).toISOString().slice(0, 10), 0
+      ]));
       const users = new Map();
       const ads = new Map();
       for (const row of [...impressions.values(), ...clicks.values()]) {
@@ -128,6 +132,8 @@ async function createLedger(dataDir, now = () => Date.now()) {
         } else { totals.clicks++; user.clicks++; }
         totals.estimatedUsd += usd;
         if (row.at.slice(0, 10) === today) totals.todayEstimatedUsd += usd;
+        const day = row.at.slice(0, 10);
+        if (dailyRevenue.has(day)) dailyRevenue.set(day, dailyRevenue.get(day) + usd);
         user.estimatedUsd += usd;
         if (row.at > user.lastAt) user.lastAt = row.at;
         users.set(row.userId, user);
@@ -148,7 +154,10 @@ async function createLedger(dataDir, now = () => Date.now()) {
         totalAds: ads.size,
         ads: [...ads.values()].sort((a, b) => b.at.localeCompare(a.at)).slice(0, limit)
       } : null;
-      return { currency: "USD", totals, users: recentUsers.slice(0, 50), selected };
+      return {
+        currency: "USD", totals, users: recentUsers.slice(0, 50), selected,
+        dailyRevenue: [...dailyRevenue].map(([date, estimatedUsd]) => ({ date, estimatedUsd }))
+      };
     },
     counts(userId) {
       const today = new Date().toISOString().slice(0, 10);
