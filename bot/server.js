@@ -233,12 +233,13 @@ async function createServer({ botToken, webhookSecret, postbackSecret, adminSecr
   const menuConfiguredForChat = new Set();
   const pendingLinks = new Map();
   const lookupPhoto = getTelegramPhoto || (userId => fetchTelegramPhoto(botToken, userId));
-  const lookupAccount = getYoungMoneyAccount || (async (token, deviceId) => {
+  const lookupAccount = getYoungMoneyAccount || (async (token, deviceId, shieldHeaders) => {
     const base = process.env.YOUNGMONEY_API_URL || "https://youngmoney-api-railway-production-5bf3.up.railway.app";
     const url = new URL("/api/v1/telegram/identity.php", base);
     if (url.protocol !== "https:" || url.origin !== new URL(base).origin) throw new Error("Invalid Young Money API URL");
     const response = await fetch(url, {
       method: "POST", headers: {
+        ...shieldHeaders,
         authorization: `Bearer ${token}`, "x-youngmoney-device-id": deviceId
       },
       signal: AbortSignal.timeout(8000)
@@ -337,7 +338,14 @@ async function createServer({ botToken, webhookSecret, postbackSecret, adminSecr
         if (typeof deviceId !== "string" || !/^v4[a-f0-9]{62}$/.test(deviceId)) {
           reply(res, 403, { ok: false }); return;
         }
-        try { account = await lookupAccount(match[1], deviceId); }
+        if (req.headers["x-shield-request-path"] !== "/api/v1/telegram/identity.php" ||
+            req.headers["x-shield-request-method"] !== "POST" ||
+            req.headers["x-shield-device-id"] !== deviceId) {
+          reply(res, 403, { ok: false }); return;
+        }
+        const shieldHeaders = Object.fromEntries(Object.entries(req.headers)
+          .filter(([key, value]) => key.startsWith("x-shield-") && typeof value === "string"));
+        try { account = await lookupAccount(match[1], deviceId, shieldHeaders); }
         catch (error) {
           console.error("Young Money identity check failed:", error.message);
           reply(res, 503, { ok: false }); return;

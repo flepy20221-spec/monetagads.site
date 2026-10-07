@@ -341,7 +341,13 @@ test("v2 link verifies the Young Money token and preserves one account per Teleg
   const answers = [];
   let checked = 0;
   const deviceId = "v4" + "a".repeat(62);
-  const deviceHeaders = { "x-youngmoney-device-id": deviceId };
+  const deviceHeaders = {
+    "x-youngmoney-device-id": deviceId,
+    "x-shield-request-path": "/api/v1/telegram/identity.php",
+    "x-shield-request-method": "POST",
+    "x-shield-device-id": deviceId,
+    "x-shield-signature": "signed-by-app"
+  };
   await withServer(async (base, _sent, dataDir) => {
     const endpoint = base + "/api/app-links/v2";
     assert.equal((await fetch(endpoint, { method: "POST" })).status, 401);
@@ -396,8 +402,9 @@ test("v2 link verifies the Young Money token and preserves one account per Teleg
     assert.equal(checked, 3);
   }, {
     answerCallback: async answer => answers.push(answer),
-    getYoungMoneyAccount: async (token, id) => {
+    getYoungMoneyAccount: async (token, id, shieldHeaders) => {
       checked++;
+      assert.equal(shieldHeaders["x-shield-signature"], "signed-by-app");
       return token === "valid-youngmoney-token" && id === deviceId ?
         { id: 42, deviceHash: crypto.createHash("sha256").update(id).digest("hex") } : null;
     }
