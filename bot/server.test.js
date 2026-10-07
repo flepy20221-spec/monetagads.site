@@ -6,7 +6,7 @@ const crypto = require("node:crypto");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
-const { createServer, fetchTelegramPhoto } = require("./server");
+const { createServer, fetchTelegramPhoto, configureTelegramWebhook } = require("./server");
 
 const config = {
   botToken: "test-token",
@@ -45,6 +45,29 @@ test("health is public; webhook requires the Telegram secret", async () => {
     assert.equal(response.status, 403);
     assert.equal(sent.length, 0);
   });
+});
+
+test("startup registers callback_query updates without discarding pending messages", async () => {
+  const calls = [];
+  await configureTelegramWebhook("test-token", config.webhookSecret,
+    "telegram-webhook-production-aa93.up.railway.app", async (url, options) => {
+      calls.push({ url, options });
+      if (url.endsWith("/setWebhook")) {
+        const body = JSON.parse(options.body);
+        assert.equal(body.url, "https://telegram-webhook-production-aa93.up.railway.app/telegram/webhook");
+        assert.equal(body.secret_token, config.webhookSecret);
+        assert.deepEqual(body.allowed_updates, ["message", "callback_query"]);
+        assert.equal(body.drop_pending_updates, undefined);
+        return new Response(JSON.stringify({ ok: true }));
+      }
+      return new Response(JSON.stringify({ ok: true, result: {
+        url: "https://telegram-webhook-production-aa93.up.railway.app/telegram/webhook",
+        allowed_updates: ["message", "callback_query"]
+      } }));
+    });
+  assert.equal(calls.length, 2);
+  await assert.rejects(configureTelegramWebhook("test-token", config.webhookSecret,
+    "attacker.example", async () => { throw new Error("must not send"); }));
 });
 
 test("private /start returns the Mini App button and privacy link", async () => {

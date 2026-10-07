@@ -103,6 +103,36 @@ async function readJson(req) {
   }
 }
 
+async function configureTelegramWebhook(botToken, webhookSecret, publicDomain, request = fetch) {
+  if (typeof publicDomain !== "string" || !/^[A-Za-z0-9-]+\.up\.railway\.app$/.test(publicDomain)) {
+    throw new Error("RAILWAY_PUBLIC_DOMAIN is not a valid Railway domain");
+  }
+  const endpoint = `https://api.telegram.org/bot${botToken}/`;
+  const response = await request(endpoint + "setWebhook", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      url: `https://${publicDomain}/telegram/webhook`,
+      secret_token: webhookSecret,
+      allowed_updates: ["message", "callback_query"]
+    }),
+    signal: AbortSignal.timeout(8000)
+  });
+  if (!response.ok || !(await response.json()).ok) {
+    throw new Error(`Telegram setWebhook failed (${response.status})`);
+  }
+  const status = await request(endpoint + "getWebhookInfo", {
+    signal: AbortSignal.timeout(8000)
+  });
+  if (!status.ok) throw new Error(`Telegram getWebhookInfo failed (${status.status})`);
+  const info = await status.json();
+  if (!info.ok ||
+      info.result?.url !== `https://${publicDomain}/telegram/webhook` ||
+      !info.result.allowed_updates?.includes("callback_query")) {
+    throw new Error("Telegram webhook is not subscribed to callback_query");
+  }
+}
+
 function makeMessage(update, webAppUrl, ledger) {
   const message = update?.message;
   if (message?.chat?.type !== "private" || typeof message.text !== "string") return null;
@@ -450,7 +480,16 @@ if (require.main === module) {
     dataDir: process.env.DATA_DIR
   }).then(server => server.listen(Number(process.env.PORT || 3000), "0.0.0.0", () => {
     console.log("Young Money Telegram webhook and Monetag postback listening");
+    configureTelegramWebhook(
+      process.env.BOT_TOKEN,
+      process.env.WEBHOOK_SECRET,
+      process.env.RAILWAY_PUBLIC_DOMAIN
+    ).then(() => {
+      console.log("Telegram webhook subscribed to messages and button callbacks");
+    }).catch(error => {
+      console.error("Telegram webhook subscription failed:", error.message);
+    });
   })).catch(error => { console.error("Startup failed:", error); process.exitCode = 1; });
 }
 
-module.exports = { createServer, makeMessage, verifyInitData, fetchTelegramPhoto };
+module.exports = { createServer, makeMessage, verifyInitData, fetchTelegramPhoto, configureTelegramWebhook };
