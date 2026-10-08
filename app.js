@@ -141,8 +141,9 @@
     countVisible.textContent = String(count);
     countA11y.textContent = String(count);
     accountStatus.textContent = !progress ? "Conectando ao servidor..." :
-      progress.accountId ? `Young Money #${progress.accountId} • Telegram conectado` :
-        "Telegram conectado • vincule a conta pelo app Young Money";
+      (progress.accountId ? `Young Money #${progress.accountId} • Telegram conectado` :
+        "Telegram conectado • vincule a conta pelo app Young Money") +
+      " • zera às 00:00 (Brasília)";
     slots.replaceChildren();
 
     for (let i = 0; i < count; i++) {
