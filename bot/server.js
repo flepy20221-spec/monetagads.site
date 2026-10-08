@@ -375,8 +375,11 @@ async function createServer({ botToken, webhookSecret, postbackSecret, adminSecr
       if (!tokenHash) { reply(res, 401, { ok: false }); return; }
       const userId = ledger.linkedUser(tokenHash);
       if (userId) {
+        const counts = ledger.counts(userId);
         reply(res, 200, { state: "linked", accountId: ledger.linkAccount(tokenHash),
-          ...ledger.dailyVideoProgress(userId) });
+          day: counts.today, completed: Math.min(counts.todayTotal, 15), goal: 15,
+          impressions: counts.todayTotal,
+          completedVideos: ledger.dailyVideoProgress(userId).completed });
         return;
       }
       const pending = [...pendingLinks.values()].some(

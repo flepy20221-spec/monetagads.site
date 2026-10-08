@@ -283,7 +283,7 @@ test("video total counts one signed SDK completion only after a Monetag impressi
   });
 });
 
-test("Telegram callback confirms the app link and exposes only today's paired completions", async () => {
+test("Telegram link card matches today's confirmed impressions, even without SDK completion", async () => {
   const answers = [];
   await withServer(async (base, sent, dataDir) => {
     const created = await fetch(`${base}/api/app-links`, { method: "POST" });
@@ -310,22 +310,29 @@ test("Telegram callback confirms the app link and exposes only today's paired co
     let progress = await (await fetch(statusUrl, { headers: auth })).json();
     assert.equal(progress.state, "linked");
     assert.equal(progress.completed, 0);
+    assert.equal(progress.impressions, 0);
+    assert.equal(progress.completedVideos, 0);
     assert.equal(progress.goal, 15);
 
     const headers = { origin: "https://example.com", "x-telegram-init-data": initData(123) };
     const { ymid } = await (await fetch(`${base}/api/ad-attempts`, { method: "POST", headers })).json();
-    await fetch(`${base}/api/ad-completions`, {
-      method: "POST", headers: { ...headers, "content-type": "application/json" },
-      body: JSON.stringify({ ymid })
-    });
-    progress = await (await fetch(statusUrl, { headers: auth })).json();
-    assert.equal(progress.completed, 0);
     const postback = new URL(`${base}/monetag/postback`);
     Object.entries({ key: config.postbackSecret, ymid, event: "impression", value: "valued", zone: "11977205", telegram_id: "123", source: "daily_video", price: "0.001" })
       .forEach(([key, value]) => postback.searchParams.set(key, value));
     await fetch(postback);
     progress = await (await fetch(statusUrl, { headers: auth })).json();
+    const miniAppProgress = await (await fetch(`${base}/api/impressions`, { headers })).json();
     assert.equal(progress.completed, 1);
+    assert.equal(progress.impressions, miniAppProgress.todayTotal);
+    assert.equal(progress.day, miniAppProgress.today);
+    assert.equal(progress.completedVideos, 0);
+    await fetch(`${base}/api/ad-completions`, {
+      method: "POST", headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({ ymid })
+    });
+    progress = await (await fetch(statusUrl, { headers: auth })).json();
+    assert.equal(progress.completed, 1);
+    assert.equal(progress.completedVideos, 1);
     assert.match(progress.day, /^\d{4}-\d\d-\d\d$/);
     assert.equal((await fetch(statusUrl, { headers: { authorization: `Bearer ${"a".repeat(43)}` } })).status, 401);
 
@@ -333,6 +340,7 @@ test("Telegram callback confirms the app link and exposes only today's paired co
     await new Promise(resolve => restarted.listen(0, "127.0.0.1", resolve));
     const persisted = await (await fetch(`http://127.0.0.1:${restarted.address().port}/api/app-links/status`, { headers: auth })).json();
     assert.equal(persisted.completed, 1);
+    assert.equal(persisted.completedVideos, 1);
     await new Promise(resolve => restarted.close(resolve));
   }, { answerCallback: async answer => answers.push(answer) });
 });
