@@ -14,6 +14,12 @@ O app Android atualizado solicita `POST /api/app-links/v2` com seu token Young M
 
 O card do app lê `GET /api/app-links/status`: o campo `completed` representa as impressões confirmadas de hoje, limitado a 15, igual à contagem mostrada na Mini App. `impressions` contém a contagem diária sem o limite visual e `completedVideos` preserva, em separado, os vídeos concluídos com confirmação da Monetag. O dia de ambos os progressos do card e da Mini App usa `America/Sao_Paulo`.
 
+## Missão e saques
+
+A missão `telegram_15_videos` é inserida **pausada** no catálogo compartilhado. O administrador pode ativá-la ou pausá-la em Missões diárias; o prêmio é fixo em 200 pontos por dia, após 15 impressões confirmadas e vínculo à mesma conta Young Money. A API confere de novo o contador do bot antes de creditar, com um resgate por conta e dia. O app versão 84.0.22 ou superior envia o token de vínculo nos pedidos autenticados de tarefa e abre o Mini App pelo card da missão; o atalho da Home continua exibindo o mesmo contador do bot.
+
+Após 15 impressões no dia, aparece o botão de saque na Mini App. A API `POST /withdraw/telegram.php` valida o `initData` assinado no bot, o vínculo e o status global da missão. Consulta o saldo real e as regras PIX/FaucetPay do painel, registra um pedido pendente com débito transacional e ID idempotente, e entrega o pedido ao fluxo de aprovação já existente no painel. O método FaucetPay da tela usa USDT e e-mail de conta FaucetPay; o pagamento só é tentado pelo servidor após a aprovação do administrador. Completar a meta apenas libera a tela; os 200 pontos da missão são resgatados no app Young Money, e os mínimos normais de saque continuam valendo. Durante a pausa, o formulário não é liberado mesmo após 15 impressões.
+
 Implante o endpoint aditivo da API Young Money antes do bot e publique o site após o bot. O bot usa `YOUNGMONEY_API_URL` se definido; sem ele, consulta a URL de produção existente no app. O app Android atualizado pode ser distribuído depois. Não há nova variável secreta para configurar. O volume `DATA_DIR` continua obrigatório para manter as contagens e os vínculos após reinícios.
 
 Após uma tentativa de anúncio, o botão mostra uma contagem regressiva de 10 segundos antes de permitir a próxima. A Mini App também espera 10 segundos após o anúncio fechar ou falhar. O servidor aplica um intervalo mínimo de 10 segundos entre tentativas do mesmo ID do Telegram, mesmo após recarregar a página ou reiniciar o serviço; durante esse intervalo, retorna HTTP 429 com `retryAfterSeconds`.

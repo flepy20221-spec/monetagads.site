@@ -7,10 +7,11 @@
     <meta name="description" content="Young Money: assista a vídeos e acompanhe seu limite diário." />
     <title>Young Money | Vídeos diários</title>
     <link rel="preload" href="./assets/young-money-space.webp?v=470b58c" as="image" />
-    <link rel="stylesheet" href="./styles.css?v=server-progress-v2" />
+    <link rel="stylesheet" href="./styles.css?v=telegram-withdraw-v1" />
     <script src="https://telegram.org/js/telegram-web-app.js" defer></script>
     <script src="https://libtl.com/sdk.js" data-zone="11977205" data-sdk="show_11977205" defer></script>
-    <script src="./app.js?v=server-progress-v3" defer></script>
+    <script src="./app.js?v=telegram-withdraw-v1" defer></script>
+    <script src="./withdraw.js?v=telegram-withdraw-v1" defer></script>
   </head>
   <body>
     <main class="scene" aria-labelledby="page-title">
@@ -45,6 +46,53 @@
           <span id="button-state-label">Carregando...</span>
         </span>
       </button>
+
+      <button id="withdraw-open" class="withdraw-open" type="button" hidden>Ver saque PIX ou FaucetPay</button>
+
+      <section id="withdraw-screen" class="withdraw-screen" aria-labelledby="withdraw-title" hidden>
+        <div class="withdraw-heading">
+          <button id="withdraw-back" type="button" class="withdraw-back" aria-label="Voltar aos vídeos">←</button>
+          <div>
+            <p class="withdraw-eyebrow">YOUNG MONEY · MINI APP</p>
+            <h2 id="withdraw-title">Solicitar saque</h2>
+          </div>
+        </div>
+        <p id="withdraw-message" class="withdraw-message" role="status">Consultando sua conta...</p>
+        <div id="withdraw-wallet" class="withdraw-wallet" hidden>
+          <span>Saldo da conta Young Money</span>
+          <strong id="withdraw-balance">0 pontos</strong>
+          <small id="withdraw-balance-brl"></small>
+        </div>
+        <form id="withdraw-form" class="withdraw-form" hidden>
+          <label for="withdraw-method">Receber por</label>
+          <select id="withdraw-method" name="method" required>
+            <option value="pix">PIX</option>
+            <option value="faucetpay">FaucetPay · USDT</option>
+          </select>
+          <p id="withdraw-rules" class="withdraw-rules"></p>
+          <label for="withdraw-amount">Valor em reais (R$)</label>
+          <input id="withdraw-amount" name="amount" type="text" inputmode="decimal" autocomplete="off" placeholder="1,00" required />
+          <div id="withdraw-pix-fields" class="withdraw-fields">
+            <label for="withdraw-pix-type">Tipo de chave PIX</label>
+            <select id="withdraw-pix-type" name="pix_type">
+              <option value="CPF">CPF</option>
+              <option value="EMAIL">E-mail</option>
+              <option value="TELEFONE">Telefone</option>
+              <option value="EVP">Chave aleatória</option>
+            </select>
+            <label for="withdraw-pix-key">Chave PIX</label>
+            <input id="withdraw-pix-key" name="pix_key" type="text" autocomplete="off" maxlength="255" />
+          </div>
+          <div id="withdraw-faucet-fields" class="withdraw-fields" hidden>
+            <label for="withdraw-faucet-email">E-mail da conta FaucetPay</label>
+            <input id="withdraw-faucet-email" name="faucet_email" type="email" autocomplete="email" maxlength="255" />
+            <p>Pagamento em USDT. A cotação é confirmada no servidor ao solicitar.</p>
+          </div>
+          <p id="withdraw-validation" class="withdraw-validation" role="status"></p>
+          <button id="withdraw-submit" class="withdraw-submit" type="submit" disabled>Solicitar análise do saque</button>
+          <p class="withdraw-footnote">As 15 impressões liberam esta tela. Resgate os 200 pontos da tarefa no app Young Money. O saque usa o saldo real de pontos e aguarda aprovação no painel.</p>
+        </form>
+      </section>
 
       <div id="notice" class="notice" role="status" aria-live="polite"></div>
     </main>

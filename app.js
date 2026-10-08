@@ -48,6 +48,7 @@
           throw new Error("Resposta inválida do servidor.");
         }
         progress = data;
+        window.dispatchEvent(new CustomEvent("ym:progress", { detail: data }));
         clearTimeout(resetTimer);
         resetTimer = setTimeout(() => { void refreshProgress().catch(showProgressError); },
           Math.max(100, Date.parse(data.resetAt) - Date.parse(data.serverNow) + 100));
@@ -55,6 +56,7 @@
       } finally { clearTimeout(timeout); }
     })().catch(error => {
       progress = null;
+      window.dispatchEvent(new CustomEvent("ym:progress", { detail: null }));
       clearTimeout(resetTimer);
       render();
       throw error;
