@@ -198,7 +198,7 @@ function makeMessage(update, webAppUrl, ledger) {
     const counts = ledger.counts(userId);
     return {
       chat_id: message.chat.id,
-      text: `Impressões confirmadas pela Monetag (Brasília):\nHoje: ${counts.todayTotal} (${counts.todayValued} monetizadas)\nTotal: ${counts.total} (${counts.valued} monetizadas)\n\nUma impressão começa quando o anúncio aparece; não significa vídeo concluído, saldo ou saque.`
+      text: `Mini App (horário de Brasília):\nVídeos concluídos hoje: ${counts.completedVideos}/15\nImpressões confirmadas: ${counts.todayTotal}\n\nAo completar 15 vídeos com impressão confirmada, você recebe R$ 0,05 no saldo do Mini App. O saque é solicitado na própria Mini App e aparece no painel para análise.`
     };
   }
   if (command === "privacidade") {
@@ -207,7 +207,7 @@ function makeMessage(update, webAppUrl, ledger) {
   if (command === "ajuda") {
     return {
       chat_id: message.chat.id,
-      text: "Toque em Abrir Mini App para acompanhar até 15 impressões confirmadas por dia na sua conta Telegram. A contagem reinicia à meia-noite de Brasília. Use /status para consultar o histórico. Impressões não representam saldo, pontos ou saque.",
+      text: "Abra a Mini App para assistir 15 vídeos por dia. A meta confirmada credita R$ 0,05 no saldo separado do Telegram; você pode solicitar PIX ou FaucetPay na tela de saque. Use /status para consultar o progresso.",
       reply_markup: { inline_keyboard: [[{ text: "🚀 Abrir Mini App", web_app: { url: webAppUrl } }], [{ text: "Privacidade", url: privacyUrl }]] }
     };
   }
@@ -412,9 +412,8 @@ async function createServer({ botToken, webhookSecret, postbackSecret, adminSecr
       if (userId) {
         const counts = ledger.counts(userId);
         reply(res, 200, { state: "linked", accountId: ledger.linkAccount(tokenHash),
-          day: counts.today, completed: Math.min(counts.todayTotal, 15), goal: 15,
-          impressions: counts.todayTotal,
-          completedVideos: ledger.dailyVideoProgress(userId).completed });
+          day: counts.today, completed: counts.completedVideos, goal: 15,
+          impressions: counts.todayTotal, completedVideos: counts.completedVideos });
         return;
       }
       const pending = [...pendingLinks.values()].some(
@@ -586,7 +585,7 @@ async function createServer({ botToken, webhookSecret, postbackSecret, adminSecr
             linked ? "Conta vinculada. Volte ao aplicativo Young Money." : "Vínculo expirado. Abra o aplicativo para gerar outro.",
           show_alert: !linked
         });
-        if (linked) await send({ chat_id: userId, text: `${displayName(callback.from)}, sua conta Telegram foi vinculada ao card Mini App. O card mostra os vídeos de hoje e não dá pontos. Abra a Mini App para assistir aos vídeos.`, reply_markup: { inline_keyboard: [[{ text: "🚀 Abrir Mini App", web_app: { url: appUrl } }]] } });
+        if (linked) await send({ chat_id: userId, text: `${displayName(callback.from)}, seu Telegram foi vinculado ao card Mini App. O saldo e os saques da Mini App são separados dos pontos Young Money.`, reply_markup: { inline_keyboard: [[{ text: "🚀 Abrir Mini App", web_app: { url: appUrl } }]] } });
         reply(res, 200, { ok: true });
         return;
       }

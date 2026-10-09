@@ -42,6 +42,7 @@
         if (!response.ok) throw new Error("Não foi possível consultar as impressões.");
         const data = await response.json();
         if (!Number.isInteger(data.todayTotal) || data.todayTotal < 0 ||
+            !Number.isInteger(data.completedVideos) || data.completedVideos < 0 ||
             !/^\d{4}-\d{2}-\d{2}$/.test(data.today) ||
             !Number.isFinite(Date.parse(data.resetAt)) ||
             !Number.isFinite(Date.parse(data.serverNow))) {
@@ -139,13 +140,11 @@
   }
 
   function render() {
-    const count = Math.min(DAILY_LIMIT, progress?.todayTotal || 0);
+    const count = Math.min(DAILY_LIMIT, progress?.completedVideos || 0);
     countVisible.textContent = String(count);
     countA11y.textContent = String(count);
     accountStatus.textContent = !progress ? "Conectando ao servidor..." :
-      (progress.accountId ? `Young Money #${progress.accountId} • Telegram conectado` :
-        "Telegram conectado • vincule a conta pelo app Young Money") +
-      " • zera às 00:00 (Brasília)";
+      "Telegram conectado • saldo da Mini App separado • meta reinicia às 00:00 (Brasília)";
     slots.replaceChildren();
 
     for (let i = 0; i < count; i++) {
@@ -176,7 +175,7 @@
     } else {
       button.disabled = false;
       button.dataset.state = "ready";
-      button.setAttribute("aria-label", `Assistir vídeo. ${count} de ${DAILY_LIMIT} impressões confirmadas hoje.`);
+      button.setAttribute("aria-label", `Assistir vídeo. ${count} de ${DAILY_LIMIT} vídeos concluídos e confirmados hoje.`);
     }
   }
 
@@ -203,7 +202,7 @@
     }
     if (response.status === 409) {
       await refreshProgress();
-      showNotice("Limite de impressões atingido. Volte após meia-noite.");
+      showNotice("Meta de vídeos concluída. Volte após meia-noite.");
       return null;
     }
     if (!response.ok) throw new Error("Could not prepare ad");
@@ -214,7 +213,7 @@
 
   button.addEventListener("click", async () => {
     if (inFlight || !progress || secondsRemaining()) return;
-    if (progress.todayTotal >= DAILY_LIMIT) { render(); return; }
+    if (progress.completedVideos >= DAILY_LIMIT) { render(); return; }
 
     const showAd = window.show_11977205;
     if (typeof showAd !== "function") {
@@ -267,3 +266,4 @@
   setInterval(() => { if (!document.hidden) void refreshProgress().catch(showProgressError); }, 30000);
   if (secondsRemaining()) scheduleCooldownTimer();
 })();
+

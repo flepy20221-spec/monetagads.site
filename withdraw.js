@@ -2,26 +2,27 @@
   "use strict";
 
   const endpoint = "https://youngmoney-api-railway-production-5bf3.up.railway.app/withdraw/telegram.php";
-  const openButton = document.getElementById("withdraw-open");
-  const screen = document.getElementById("withdraw-screen");
-  const backButton = document.getElementById("withdraw-back");
-  const message = document.getElementById("withdraw-message");
-  const wallet = document.getElementById("withdraw-wallet");
-  const balance = document.getElementById("withdraw-balance");
-  const balanceBrl = document.getElementById("withdraw-balance-brl");
-  const form = document.getElementById("withdraw-form");
-  const method = document.getElementById("withdraw-method");
-  const amount = document.getElementById("withdraw-amount");
-  const rules = document.getElementById("withdraw-rules");
-  const pixFields = document.getElementById("withdraw-pix-fields");
-  const faucetFields = document.getElementById("withdraw-faucet-fields");
-  const pixType = document.getElementById("withdraw-pix-type");
-  const pixKey = document.getElementById("withdraw-pix-key");
-  const faucetEmail = document.getElementById("withdraw-faucet-email");
-  const validation = document.getElementById("withdraw-validation");
-  const submit = document.getElementById("withdraw-submit");
-  const pointFormat = new Intl.NumberFormat("pt-BR");
-  const moneyFormat = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
+  const byId = id => document.getElementById(id);
+  const openButton = byId("withdraw-open");
+  const screen = byId("withdraw-screen");
+  const message = byId("withdraw-message");
+  const wallet = byId("withdraw-wallet");
+  const balance = byId("withdraw-balance");
+  const balanceDetail = byId("withdraw-balance-brl");
+  const form = byId("withdraw-form");
+  const method = byId("withdraw-method");
+  const amount = byId("withdraw-amount");
+  const rules = byId("withdraw-rules");
+  const pixFields = byId("withdraw-pix-fields");
+  const faucetFields = byId("withdraw-faucet-fields");
+  const pixType = byId("withdraw-pix-type");
+  const pixKey = byId("withdraw-pix-key");
+  const faucetEmail = byId("withdraw-faucet-email");
+  const validation = byId("withdraw-validation");
+  const submit = byId("withdraw-submit");
+  const history = byId("withdraw-history");
+  const historyList = byId("withdraw-history-list");
+  const money = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
   let status = null;
   let busy = false;
   let requestId = null;
@@ -51,74 +52,66 @@
   }
 
   function validate() {
-    const settings = status?.settings;
     const selected = method.value;
-    const enabled = settings?.methods?.includes(selected);
     pixFields.hidden = selected !== "pix";
     faucetFields.hidden = selected !== "faucetpay";
-    const minimumBrl = selected === "pix" ? settings?.min_pix_brl : settings?.min_faucetpay_brl;
-    const minimumPoints = selected === "pix" ? settings?.min_pix_points : settings?.min_faucetpay_points;
-    rules.textContent = settings
-      ? `Mínimo: ${moneyFormat.format(minimumBrl || 0)} e ${pointFormat.format(minimumPoints || 0)} pontos. Máximo: ${moneyFormat.format(settings.max_brl)}.`
-      : "";
+    rules.textContent = "Mínimo de R$ 0,05. Saque em múltiplos de R$ 0,05 até o saldo disponível. FaucetPay recebe USDT convertido na cotação do pedido.";
     const normalized = amount.value.trim().replace(",", ".");
     const amountValid = /^(?:0|[1-9]\d{0,5})(?:\.\d{1,2})?$/.test(normalized);
-    const amountNumber = amountValid ? Number(normalized) : 0;
-    const neededPoints = Math.round(amountNumber * (settings?.points_per_real || 0));
+    const cents = amountValid ? Math.round(Number(normalized) * 100) : 0;
     const destinationValid = selected === "pix"
       ? pixKey.value.trim().length >= 5
       : /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(faucetEmail.value.trim());
-    const valid = Boolean(status?.unlocked && enabled && amountValid &&
-      amountNumber >= minimumBrl && amountNumber <= settings.max_brl &&
-      neededPoints >= minimumPoints && neededPoints <= status.balance_points && destinationValid);
+    const valid = Boolean(status?.unlocked && status.methods?.includes(selected) &&
+      cents >= 5 && cents % 5 === 0 && cents <= status.balance_cents && destinationValid);
     submit.disabled = busy || !valid;
-    validation.textContent = !status?.unlocked ? "" : !amount.value.trim() ? "" :
+    validation.textContent = !status?.unlocked || !amount.value.trim() ? "" :
       !amountValid ? "Informe um valor válido com até duas casas decimais." :
-        neededPoints > status.balance_points ? "Saldo insuficiente para este valor." :
-          amountNumber < minimumBrl || neededPoints < minimumPoints ? "Valor abaixo do mínimo configurado." :
-            amountNumber > settings.max_brl ? "Valor acima do máximo configurado." : "";
+      cents < 5 || cents % 5 !== 0 ? "Use R$ 0,05 ou um múltiplo desse valor." :
+      cents > status.balance_cents ? "Saldo insuficiente para este saque." : "";
     return valid ? normalized : null;
   }
 
+  function renderHistory(rows) {
+    historyList.replaceChildren();
+    history.hidden = !Array.isArray(rows) || rows.length === 0;
+    if (history.hidden) return;
+    for (const row of rows) {
+      const line = document.createElement("p");
+      const state = { pending: "em análise", paid: "pago", rejected: "recusado; saldo devolvido" }[row.status] || row.status;
+      const usdt = row.method === "faucetpay" && row.crypto_amount !== null
+        ? ` · ${Number(row.crypto_amount).toFixed(8)} USDT` : "";
+      line.textContent = `#${row.id} · ${money.format(row.amount_cents / 100)} · ${row.method === "pix" ? "PIX" : "FaucetPay"}${usdt} · ${state}`;
+      historyList.append(line);
+    }
+  }
+
   function render(data) {
+    if (!Number.isInteger(data.balance_cents) || !Number.isInteger(data.current) || !Array.isArray(data.methods)) {
+      throw new Error("Resposta inválida do servidor.");
+    }
     status = data;
-    wallet.hidden = !data.linked;
-    if (data.linked) {
-      balance.textContent = `${pointFormat.format(data.balance_points)} pontos`;
-      balanceBrl.textContent = data.settings?.points_per_real
-        ? `Equivalente aproximado: ${moneyFormat.format(data.balance_points / data.settings.points_per_real)}`
-        : "";
-    }
-    form.hidden = !data.unlocked || !data.settings;
-    if (!data.mission_active) setMessage("A missão e o saque do Mini App estão pausados. Aguarde a liberação no painel.");
-    else if (!data.linked) setMessage("Seu Telegram está conectado, mas o vínculo antigo não confirma sua conta Young Money para saques. Atualize o app Young Money e abra o card Mini App para verificar a conta. As impressões de hoje continuam registradas.");
-    else if (!data.unlocked) setMessage(`Progresso de hoje: ${data.current}/15. Complete as impressões confirmadas para abrir o saque.`);
-    else if (!data.settings.methods.length) setMessage("PIX e FaucetPay estão desativados no painel administrativo.");
-    else setMessage("Meta de 15/15 confirmada. Escolha o método e confira seu saldo antes de solicitar.");
-    for (const option of method.options) option.disabled = !data.settings?.methods?.includes(option.value);
-    if (data.settings?.methods?.length && method.selectedOptions[0]?.disabled) {
-      method.value = data.settings.methods[0];
-    }
+    wallet.hidden = false;
+    balance.textContent = money.format(data.balance_cents / 100);
+    balanceDetail.textContent = `Meta de hoje: ${data.current}/${data.goal} vídeos · +${money.format(data.reward_cents / 100)} ao completar`;
+    form.hidden = !data.unlocked || data.methods.length === 0;
+    for (const option of method.options) option.disabled = !data.methods.includes(option.value);
+    if (data.methods.length && method.selectedOptions[0]?.disabled) method.value = data.methods[0];
+    if (data.unlocked && !amount.value.trim()) amount.value = (data.balance_cents / 100).toFixed(2).replace(".", ",");
+    if (!data.unlocked) setMessage(`Progresso de hoje: ${data.current}/${data.goal}. Complete 15 vídeos para ganhar R$ 0,05. O saldo acumulado fica disponível para saque.`);
+    else setMessage("Escolha PIX ou FaucetPay para solicitar o saque do saldo da Mini App.");
+    renderHistory(data.history);
     validate();
   }
 
   async function loadStatus() {
-    setMessage("Consultando sua conta...");
-    form.hidden = true;
+    setMessage("Consultando seu saldo...");
     try { render(await callApi({ action: "status" })); }
-    catch (error) { status = null; wallet.hidden = true; setMessage(error.message, "error"); }
+    catch (error) { status = null; wallet.hidden = true; form.hidden = true; history.hidden = true; setMessage(error.message, "error"); }
   }
 
-  openButton.addEventListener("click", () => {
-    screen.hidden = false;
-    void loadStatus();
-  });
-  backButton.addEventListener("click", () => { screen.hidden = true; });
-  window.addEventListener("ym:progress", event => {
-    const unlockedByCount = event.detail?.todayTotal >= 15;
-    openButton.hidden = !unlockedByCount;
-    if (!unlockedByCount) screen.hidden = true;
-  });
+  openButton.addEventListener("click", () => { screen.hidden = false; void loadStatus(); });
+  byId("withdraw-back").addEventListener("click", () => { screen.hidden = true; });
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden && !screen.hidden) void loadStatus();
   });
@@ -143,11 +136,13 @@
     setMessage("Registrando sua solicitação...");
     try {
       const result = await callApi(payload);
+      requestId = null;
+      amount.value = "";
       await loadStatus();
       setMessage(`Saque #${result.withdrawal_id} solicitado. Aguarde a análise no painel.`);
     } catch (error) {
       setMessage(error.message || "Não foi possível solicitar. Tente novamente.", "error");
-      // Preserve requestId: a retry cannot debit the wallet twice.
+      // A retry with the same request ID cannot debit the wallet twice.
     } finally {
       busy = false;
       validate();

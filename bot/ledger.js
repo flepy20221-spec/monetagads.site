@@ -89,8 +89,8 @@ async function createLedger(dataDir, now = () => Date.now()) {
     createAttempt(userId, profile = null) {
       return serialized(async () => {
         const timestamp = now();
-        if (this.counts(userId).todayTotal >= 15) {
-          const error = new Error("Daily impression limit reached");
+        if (this.dailyVideoProgress(userId).completed >= 15) {
+          const error = new Error("Daily video limit reached");
           error.status = 409;
           throw error;
         }
@@ -191,12 +191,15 @@ async function createLedger(dataDir, now = () => Date.now()) {
     },
     dailyVideoProgress(userId) {
       const day = brazilDay(now());
-      let completed = 0;
+      const byDay = new Map();
       for (const row of completions.values()) {
         if (row.userId !== userId || !impressions.has(row.ymid)) continue;
-        if (brazilDay(row.at) === day) completed++;
+        const completedDay = brazilDay(row.at);
+        byDay.set(completedDay, (byDay.get(completedDay) || 0) + 1);
       }
-      return { day, completed: Math.min(completed, 15), goal: 15 };
+      return { day, completed: Math.min(byDay.get(day) || 0, 15), goal: 15,
+        rewardDays: [...byDay].filter(([, count]) => count >= 15)
+          .map(([date]) => date).sort() };
     },
     recordCompletion(userId, ymid) {
       return serialized(async () => {
@@ -286,9 +289,12 @@ async function createLedger(dataDir, now = () => Date.now()) {
     counts(userId) {
       const timestamp = now();
       const today = brazilDay(timestamp);
+      const videos = this.dailyVideoProgress(userId);
       const result = { today, serverNow: new Date(timestamp).toISOString(),
         resetAt: nextBrazilMidnight(timestamp), total: 0,
-        valued: 0, todayTotal: 0, todayValued: 0, accountId: telegramBindings.get(userId) || null };
+        valued: 0, todayTotal: 0, todayValued: 0,
+        completedVideos: videos.completed, rewardDays: videos.rewardDays,
+        telegramId: userId, accountId: telegramBindings.get(userId) || null };
       for (const row of impressions.values()) {
         if (row.userId !== userId) continue;
         result.total++;

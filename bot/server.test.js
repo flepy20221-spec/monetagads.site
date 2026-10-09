@@ -200,7 +200,7 @@ test("signed user attempt links priced impression and click once, with a private
       body: JSON.stringify({ message: { chat: { id: 123, type: "private" }, from: { id: 123 }, text: "/status" } })
     });
     assert.equal(status.status, 200);
-    assert.match(sent[0].text, /Total: 1 \(1 monetizadas\)/);
+    assert.match(sent[0].text, /Impressões confirmadas: 1/);
     const restarted = await createServer({ ...config, dataDir, sendMessage: async () => {}, getTelegramChat: async () => null });
     assert.equal(restarted.listening, false);
     await new Promise(resolve => restarted.listen(0, "127.0.0.1", resolve));
@@ -283,7 +283,7 @@ test("video total counts one signed SDK completion only after a Monetag impressi
   });
 });
 
-test("Telegram link card matches today's confirmed impressions, even without SDK completion", async () => {
+test("Telegram link card shows completed videos only after SDK completion and impression", async () => {
   const answers = [];
   await withServer(async (base, sent, dataDir) => {
     const created = await fetch(`${base}/api/app-links`, { method: "POST" });
@@ -306,7 +306,7 @@ test("Telegram link card matches today's confirmed impressions, even without SDK
     assert.equal((await (await fetch(statusUrl, { headers: auth })).json()).state, "pending");
     await webhook({ callback_query: { id: "good", data: `connect:${id}`, from: { id: 123, first_name: "Ana" }, message: { chat: { id: 123, type: "private" } } } });
     assert.equal(answers.at(-1).text.startsWith("Conta vinculada"), true);
-    assert.match(sent.at(-1).text, /^Ana, sua conta Telegram foi vinculada/);
+    assert.match(sent.at(-1).text, /^Ana, seu Telegram foi vinculado/);
     let progress = await (await fetch(statusUrl, { headers: auth })).json();
     assert.equal(progress.state, "linked");
     assert.equal(progress.completed, 0);
@@ -322,7 +322,7 @@ test("Telegram link card matches today's confirmed impressions, even without SDK
     await fetch(postback);
     progress = await (await fetch(statusUrl, { headers: auth })).json();
     const miniAppProgress = await (await fetch(`${base}/api/impressions`, { headers })).json();
-    assert.equal(progress.completed, 1);
+    assert.equal(progress.completed, 0);
     assert.equal(progress.impressions, miniAppProgress.todayTotal);
     assert.equal(progress.day, miniAppProgress.today);
     assert.equal(progress.completedVideos, 0);
