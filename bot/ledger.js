@@ -192,19 +192,16 @@ async function createLedger(dataDir, now = () => Date.now()) {
     },
     dailyVideoProgress(userId) {
       const day = brazilDay(now());
-      const byDay = new Map();
+      let completed = 0;
       for (const row of impressions.values()) {
         const attempt = attempts.get(row.ymid);
         if (row.userId !== userId || !attempt ||
             (attempt.completionVersion === 2 && !completions.has(row.ymid))) continue;
         // Earlier versions saved confirmed impressions without a usable completion request.
         // The marker preserves those watched videos without granting a new impression twice.
-        const videoDay = brazilDay(attempt.at);
-        byDay.set(videoDay, (byDay.get(videoDay) || 0) + 1);
+        if (brazilDay(attempt.at) === day) completed++;
       }
-      return { day, completed: Math.min(byDay.get(day) || 0, 15), goal: 15,
-        rewardDays: [...byDay].filter(([, count]) => count >= 15)
-          .map(([date]) => date).sort() };
+      return { day, completed: Math.min(completed, 15), goal: 15 };
     },
     recordCompletion(userId, ymid) {
       return serialized(async () => {
@@ -299,7 +296,7 @@ async function createLedger(dataDir, now = () => Date.now()) {
       const result = { today, serverNow: new Date(timestamp).toISOString(),
         resetAt: nextBrazilMidnight(timestamp), total: 0,
         valued: 0, todayTotal: 0, todayValued: 0,
-        completedVideos: videos.completed, rewardDays: videos.rewardDays,
+        completedVideos: videos.completed,
         telegramId: userId, accountId: telegramBindings.get(userId) || null };
       for (const row of impressions.values()) {
         if (row.userId !== userId) continue;

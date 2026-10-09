@@ -144,7 +144,7 @@
     countVisible.textContent = String(count);
     countA11y.textContent = String(count);
     accountStatus.textContent = !progress ? "Conectando ao servidor..." :
-      "Telegram conectado • saldo da Mini App separado • meta reinicia às 00:00 (Brasília)";
+      "Telegram conectado • saque diário de R$ 0,05 após 15 vídeos • meta reinicia às 00:00 (Brasília)";
     slots.replaceChildren();
 
     for (let i = 0; i < count; i++) {

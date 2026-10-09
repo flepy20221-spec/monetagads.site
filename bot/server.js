@@ -198,7 +198,7 @@ function makeMessage(update, webAppUrl, ledger) {
     const counts = ledger.counts(userId);
     return {
       chat_id: message.chat.id,
-      text: `Mini App (horário de Brasília):\nVídeos concluídos hoje: ${counts.completedVideos}/15\nImpressões confirmadas: ${counts.todayTotal}\n\nAo completar 15 vídeos com impressão confirmada, você recebe R$ 0,05 no saldo do Mini App. O saque é solicitado na própria Mini App e aparece no painel para análise.`
+      text: `Mini App (horário de Brasília):\nVídeos concluídos hoje: ${counts.completedVideos}/15\nImpressões confirmadas: ${counts.todayTotal}\n\nAo completar 15 vídeos confirmados, você pode solicitar R$ 0,05 hoje. É um pagamento por dia, sem acumular. Se os dados de pagamento estiverem errados, o administrador pode devolver para corrigir ainda hoje. O pedido aparece no painel para análise.`
     };
   }
   if (command === "privacidade") {
@@ -207,7 +207,7 @@ function makeMessage(update, webAppUrl, ledger) {
   if (command === "ajuda") {
     return {
       chat_id: message.chat.id,
-      text: "Abra a Mini App para assistir 15 vídeos por dia. A meta confirmada credita R$ 0,05 no saldo separado do Telegram; você pode solicitar PIX ou FaucetPay na tela de saque. Use /status para consultar o progresso.",
+      text: "Abra a Mini App para assistir 15 vídeos por dia. Ao completar a meta confirmada, você pode solicitar R$ 0,05 por PIX ou FaucetPay. Um pagamento por dia. Se os dados estiverem errados, corrija o pedido devolvido no mesmo dia. Não acumula para amanhã. Use /status para consultar o progresso.",
       reply_markup: { inline_keyboard: [[{ text: "🚀 Abrir Mini App", web_app: { url: webAppUrl } }], [{ text: "Privacidade", url: privacyUrl }]] }
     };
   }
@@ -585,7 +585,7 @@ async function createServer({ botToken, webhookSecret, postbackSecret, adminSecr
             linked ? "Conta vinculada. Volte ao aplicativo Young Money." : "Vínculo expirado. Abra o aplicativo para gerar outro.",
           show_alert: !linked
         });
-        if (linked) await send({ chat_id: userId, text: `${displayName(callback.from)}, seu Telegram foi vinculado ao card Mini App. O saldo e os saques da Mini App são separados dos pontos Young Money.`, reply_markup: { inline_keyboard: [[{ text: "🚀 Abrir Mini App", web_app: { url: appUrl } }]] } });
+        if (linked) await send({ chat_id: userId, text: `${displayName(callback.from)}, seu Telegram foi vinculado ao card Mini App. O saque diário da Mini App é separado dos pontos Young Money.`, reply_markup: { inline_keyboard: [[{ text: "🚀 Abrir Mini App", web_app: { url: appUrl } }]] } });
         reply(res, 200, { ok: true });
         return;
       }

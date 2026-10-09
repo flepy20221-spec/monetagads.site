@@ -6,9 +6,6 @@
   const openButton = byId("withdraw-open");
   const screen = byId("withdraw-screen");
   const message = byId("withdraw-message");
-  const wallet = byId("withdraw-wallet");
-  const balance = byId("withdraw-balance");
-  const balanceDetail = byId("withdraw-balance-brl");
   const form = byId("withdraw-form");
   const method = byId("withdraw-method");
   const amount = byId("withdraw-amount");
@@ -55,16 +52,14 @@
     const selected = method.value;
     pixFields.hidden = selected !== "pix";
     faucetFields.hidden = selected !== "faucetpay";
-    rules.textContent = "Cada saque é de R$ 0,05. Se acumular mais saldo, poderá solicitar outro saque. FaucetPay recebe USDT convertido na cotação do pedido.";
+    rules.textContent = "Um pagamento de R$ 0,05 por dia após 15 vídeos. Se os dados forem devolvidos, você pode corrigir e pedir novamente hoje. Não acumula. FaucetPay recebe USDT convertido na cotação do pedido.";
     amount.value = money.format(0.05);
     const destinationValid = selected === "pix"
       ? pixKey.value.trim().length >= 5
       : /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(faucetEmail.value.trim());
-    const valid = Boolean(status?.unlocked && status.balance_cents >= 5 &&
-      status.methods?.includes(selected) && destinationValid);
+    const valid = Boolean(status?.eligible && status.methods?.includes(selected) && destinationValid);
     submit.disabled = busy || !valid;
-    validation.textContent = status && status.balance_cents < 5
-      ? "Complete 15 vídeos confirmados para juntar R$ 0,05 e liberar o saque." : "";
+    validation.textContent = "";
     return valid ? "0.05" : null;
   }
 
@@ -74,35 +69,37 @@
     if (history.hidden) return;
     for (const row of rows) {
       const line = document.createElement("p");
-      const state = { pending: "em análise", paid: "pago", rejected: "recusado; saldo devolvido" }[row.status] || row.status;
+      const state = { pending: "em análise", paid: "pago", rejected: "devolvido para correção" }[row.status] || row.status;
       const usdt = row.method === "faucetpay" && row.crypto_amount !== null
         ? ` · ${Number(row.crypto_amount).toFixed(8)} USDT` : "";
-      line.textContent = `#${row.id} · ${money.format(row.amount_cents / 100)} · ${row.method === "pix" ? "PIX" : "FaucetPay"}${usdt} · ${state}`;
+      line.textContent = `#${row.id} · ${money.format(row.amount_cents / 100)} · ${row.method === "pix" ? "PIX" : "FaucetPay"}${usdt} · ${state}${row.status === "rejected" && row.admin_note ? ` · Motivo: ${row.admin_note}` : ""}`;
       historyList.append(line);
     }
   }
 
   function render(data) {
-    if (!Number.isInteger(data.balance_cents) || !Number.isInteger(data.current) || !Array.isArray(data.methods)) {
+    if (!Number.isInteger(data.current) || !Number.isInteger(data.goal) ||
+        data.amount_cents !== 5 || typeof data.eligible !== "boolean" ||
+        typeof data.requested_today !== "boolean" || typeof data.returned_today !== "boolean" ||
+        !Array.isArray(data.methods)) {
       throw new Error("Resposta inválida do servidor.");
     }
     status = data;
-    wallet.hidden = false;
-    balance.textContent = money.format(data.balance_cents / 100);
-    balanceDetail.textContent = `Meta de hoje: ${data.current}/${data.goal} vídeos · +${money.format(data.reward_cents / 100)} ao completar`;
-    form.hidden = data.methods.length === 0;
+    form.hidden = !data.eligible || data.methods.length === 0;
     for (const option of method.options) option.disabled = !data.methods.includes(option.value);
     if (data.methods.length && method.selectedOptions[0]?.disabled) method.value = data.methods[0];
-    if (!data.unlocked) setMessage(`Progresso de hoje: ${data.current}/${data.goal}. Complete 15 vídeos para ganhar R$ 0,05. O saldo acumulado fica disponível para saque.`);
-    else setMessage("Escolha PIX ou FaucetPay para solicitar o saque do saldo da Mini App.");
+    if (data.requested_today) setMessage("O saque de hoje já foi solicitado. Volte amanhã após completar a nova meta de 15 vídeos.");
+    else if (data.returned_today) setMessage(`Seu pedido foi devolvido${data.return_reason ? `: ${data.return_reason}` : "."} Corrija os dados e solicite novamente hoje. O direito de saque não passa para amanhã.`);
+    else if (!data.eligible) setMessage(`Vídeos de hoje: ${data.current}/${data.goal}. Complete 15 para solicitar R$ 0,05 hoje; não acumula para amanhã.`);
+    else setMessage("Meta de 15 vídeos concluída. Escolha PIX ou FaucetPay para solicitar R$ 0,05 hoje.");
     renderHistory(data.history);
     validate();
   }
 
   async function loadStatus() {
-    setMessage("Consultando seu saldo...");
+    setMessage("Consultando os vídeos de hoje...");
     try { render(await callApi({ action: "status" })); }
-    catch (error) { status = null; wallet.hidden = true; form.hidden = true; history.hidden = true; setMessage(error.message, "error"); }
+    catch (error) { status = null; form.hidden = true; history.hidden = true; setMessage(error.message, "error"); }
   }
 
   openButton.addEventListener("click", () => { screen.hidden = false; void loadStatus(); });
@@ -136,7 +133,7 @@
       setMessage(`Saque #${result.withdrawal_id} solicitado. Aguarde a análise no painel.`);
     } catch (error) {
       setMessage(error.message || "Não foi possível solicitar. Tente novamente.", "error");
-      // A retry with the same request ID cannot debit the wallet twice.
+      // A retry with the same request ID cannot create a second request.
     } finally {
       busy = false;
       validate();
