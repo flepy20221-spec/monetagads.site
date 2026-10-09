@@ -7,11 +7,11 @@
     <meta name="description" content="Young Money: assista a vídeos e acompanhe seu limite diário." />
     <title>Young Money | Vídeos diários</title>
     <link rel="preload" href="./assets/young-money-space.webp?v=470b58c" as="image" />
-    <link rel="stylesheet" href="./styles.css?v=cosmic-ui-v2" />
+    <link rel="stylesheet" href="./styles.css?v=cosmic-ui-v3" />
     <script src="https://telegram.org/js/telegram-web-app.js" defer></script>
     <script src="https://libtl.com/sdk.js" data-zone="11977205" data-sdk="show_11977205" defer></script>
     <script src="./app.js?v=cosmic-ui-v2" defer></script>
-    <script src="./withdraw.js?v=cosmic-ui-v2" defer></script>
+    <script src="./withdraw.js?v=cosmic-ui-v3" defer></script>
   </head>
   <body>
     <svg class="icon-defs" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg">
@@ -20,7 +20,7 @@
       <symbol id="icon-chevron" viewBox="0 0 24 24"><path d="m8 5 7 7-7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
       <symbol id="icon-down" viewBox="0 0 24 24"><path d="m4 9 8 8 8-8" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
       <symbol id="icon-send" viewBox="0 0 24 24"><path d="m21 3-7.5 18-3.5-7-7-3.5L21 3Zm0 0L10 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
-      <symbol id="icon-pix" viewBox="0 0 24 24"><path d="m10.8 1.7-4.2 4.2a2.6 2.6 0 0 0 0 3.7l4.2 4.2a1.7 1.7 0 0 0 2.4 0l4.2-4.2a2.6 2.6 0 0 0 0-3.7l-4.2-4.2a1.7 1.7 0 0 0-2.4 0Zm-9.1 9.1a1.7 1.7 0 0 0 0 2.4l4.2 4.2a2.6 2.6 0 0 0 3.7 0l4.2-4.2a1.7 1.7 0 0 0 0-2.4L9.6 6.6a2.6 2.6 0 0 0-3.7 0Zm12.7-4.2a2.6 2.6 0 0 0-3.7 0l-4.2 4.2a1.7 1.7 0 0 0 0 2.4l4.2 4.2a2.6 2.6 0 0 0 3.7 0l4.2-4.2a1.7 1.7 0 0 0 0-2.4Zm-3.6 3.6-4.2 4.2a2.6 2.6 0 0 0 0 3.7l4.2 4.2a1.7 1.7 0 0 0 2.4 0l4.2-4.2a2.6 2.6 0 0 0 0-3.7l-4.2-4.2a1.7 1.7 0 0 0-2.4 0Z" fill="currentColor" transform="translate(2 0) scale(.83)"/></symbol>
+      <symbol id="icon-pix" viewBox="0 0 24 24"><g fill="currentColor"><rect x="8.5" y="1.1" width="7" height="7" rx="2" transform="rotate(45 12 4.6)"/><rect x="8.5" y="15.9" width="7" height="7" rx="2" transform="rotate(45 12 19.4)"/><rect x="1.1" y="8.5" width="7" height="7" rx="2" transform="rotate(45 4.6 12)"/><rect x="15.9" y="8.5" width="7" height="7" rx="2" transform="rotate(45 19.4 12)"/></g></symbol>
       <symbol id="icon-coins" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M4 5v5c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 10v5c0 1.7 3.6 3 8 3s8-1.3 8-3v-5M4 15v4c0 1.7 3.6 3 8 3s8-1.3 8-3v-4" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
       <symbol id="icon-id" viewBox="0 0 24 24"><rect x="2.5" y="3" width="19" height="18" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="9" r="2.4" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M7.5 17c.5-2.4 2-3.3 4.5-3.3s4 .9 4.5 3.3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
       <symbol id="icon-key" viewBox="0 0 24 24"><circle cx="16.5" cy="7.5" r="5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="m12.8 11.2-9.3 9.3v-4l3-3 2 1 1-2 3.3-1.3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
@@ -67,9 +67,7 @@
         <div class="withdraw-layout">
           <header class="withdraw-heading">
             <button id="withdraw-back" type="button" class="withdraw-back" aria-label="Voltar aos vídeos"><svg aria-hidden="true"><use href="#icon-arrow" /></svg></button>
-            <div class="withdraw-brand" aria-label="Young Money Mini App">
-              <span>Young</span><span>Money</span><small>MINI APP</small>
-            </div>
+            <div class="withdraw-brand" aria-label="Young Money Mini App"><small>MINI APP</small></div>
           </header>
           <img class="withdraw-wallet-art" src="./assets/mini-withdraw-wallet.webp" alt="" width="1312" height="1199" draggable="false" />
           <div class="withdraw-intro">
@@ -98,16 +96,13 @@
                 <svg class="field-icon" aria-hidden="true"><use href="#icon-id" /></svg>
                 <select id="withdraw-pix-type" name="pix_type">
                   <option value="CPF">CPF</option>
-                  <option value="EMAIL">E-mail</option>
-                  <option value="TELEFONE">Telefone</option>
-                  <option value="EVP">Chave aleatória</option>
                 </select>
                 <svg class="field-chevron" aria-hidden="true"><use href="#icon-down" /></svg>
               </div>
               <label for="withdraw-pix-key">Chave PIX</label>
               <div class="withdraw-control">
                 <svg class="field-icon" aria-hidden="true"><use href="#icon-key" /></svg>
-                <input id="withdraw-pix-key" name="pix_key" type="text" autocomplete="off" maxlength="255" />
+                <input id="withdraw-pix-key" name="pix_key" type="text" inputmode="numeric" autocomplete="off" maxlength="14" placeholder="000.000.000-00" aria-describedby="withdraw-validation" />
               </div>
             </div>
             <div id="withdraw-faucet-fields" class="withdraw-fields" hidden>

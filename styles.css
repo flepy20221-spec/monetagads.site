@@ -204,24 +204,23 @@ body {
 }
 
 .withdraw-layout { position: relative; min-height: 100%; padding: 0 16px max(30px, env(safe-area-inset-bottom)); }
-.withdraw-heading { position: relative; height: clamp(128px, 33vw, 185px); display: grid; place-items: center; }
-.withdraw-brand { position: relative; z-index: 1; display: grid; justify-items: center; margin-top: 6px; transform: skew(-8deg); }
+.withdraw-heading { position: relative; height: clamp(101px, 26vw, 150px); display: grid; place-items: center; }
+.withdraw-brand { position: absolute; inset: 0 -16px auto; height: clamp(101px, 26vw, 150px); z-index: 1; pointer-events: none; }
 .withdraw-brand::before {
-  content: ''; position: absolute; z-index: -1;
-  top: 15%; left: -24%; width: 148%; height: 53%;
-  border: 2px solid #00dfff; border-radius: 50%; transform: rotate(-8deg);
-  box-shadow: 0 0 17px #06a9ff;
+  content: ''; position: absolute; inset: 0;
+  background: url('./assets/young-money-space.webp?v=470b58c') center top / 100% auto no-repeat;
+  -webkit-mask-image: linear-gradient(#000 0%, #000 81%, transparent 99%);
+  mask-image: linear-gradient(#000 0%, #000 81%, transparent 99%);
 }
-.withdraw-brand span {
-  display: block; font-size: clamp(33px, 10.5vw, 63px); line-height: .8;
-  font-weight: 1000; font-style: italic; letter-spacing: -.07em;
-  background: linear-gradient(#fff 24%, #cce6ff 47%, #31cfff 82%);
-  -webkit-background-clip: text; background-clip: text; color: transparent;
-  filter: drop-shadow(0 3px 2px #060a30) drop-shadow(0 0 9px #1087fa);
+.withdraw-brand small {
+  position: absolute; z-index: 2; left: 16%; right: 16%; top: clamp(81px, 21vw, 118px);
+  padding: 2px 0 4px; text-align: center;
+  background: linear-gradient(90deg, transparent, #070c31 14%, #070c31 86%, transparent);
+  color: #f3f8ff; font-size: clamp(10px, 2.8vw, 15px); font-weight: 800; letter-spacing: .37em;
+  text-shadow: 0 0 7px #1676df;
 }
-.withdraw-brand small { margin-top: 12px; color: #f4f8ff; font-size: clamp(10px, 2.8vw, 15px); font-style: normal; font-weight: 750; letter-spacing: .35em; transform: skew(8deg); }
 .withdraw-back {
-  position: absolute; z-index: 4; left: 3px; top: max(37px, env(safe-area-inset-top));
+  position: absolute; z-index: 4; left: 3px; top: max(clamp(43px, 10vw, 60px), env(safe-area-inset-top));
   width: clamp(44px, 11vw, 61px); height: clamp(44px, 11vw, 61px);
   display: grid; place-items: center; padding: 9px;
   border: 2px solid #39d5ff; border-radius: 16px;
@@ -231,14 +230,15 @@ body {
 }
 .withdraw-back svg { width: 100%; height: 100%; }
 .withdraw-wallet-art {
-  position: absolute; z-index: 3; top: clamp(66px, 18vw, 100px); right: -22px;
+  position: absolute; z-index: 3; top: clamp(82px, 21vw, 118px); right: -22px;
   width: clamp(151px, 40vw, 230px); height: auto;
   pointer-events: none; filter: drop-shadow(0 0 14px #0878fbcc);
 }
 .withdraw-intro {
   position: relative; z-index: 2; min-height: 118px;
-  margin: 0 6px -3px; padding: 20px clamp(92px, 29%, 165px) 21px 18px;
-  border: 2px solid #27c4ff; border-radius: 22px 25px 14px 15px;
+  margin: 0 clamp(13px, 4.7vw, 26px) -3px; padding: 20px clamp(92px, 29%, 165px) 21px 18px;
+  border: 2px solid #27c4ff;
+  clip-path: polygon(0 16px, 17px 0, 34% 0, 36% 5px, 62% 5px, 64% 0, calc(100% - 17px) 0, 100% 16px, 100% calc(100% - 14px), calc(100% - 14px) 100%, 14px 100%, 0 calc(100% - 14px));
   background: linear-gradient(130deg, rgba(2, 22, 74, .97), rgba(2, 10, 42, .97));
   box-shadow: 0 0 19px #009bff9e, inset 0 0 17px #116ae177;
 }
@@ -259,7 +259,7 @@ body {
 }
 .withdraw-history p { margin: 8px 0; }
 .withdraw-form {
-  position: relative; z-index: 1; margin: 0 6px; padding: 24px 17px 18px;
+  position: relative; z-index: 1; margin: 0 6px; padding: 24px clamp(29px, 7.3vw, 42px) 18px;
   display: grid; gap: 12px;
   border: 2px solid #176bd4; border-radius: 18px 18px 24px 24px;
   background: linear-gradient(135deg, rgba(4, 21, 72, .94), rgba(2, 11, 48, .94));
@@ -284,6 +284,7 @@ body {
   box-shadow: 0 0 10px #077cff, inset 0 0 11px #0a59ab;
   font: inherit; font-size: clamp(16px, 4.1vw, 23px);
 }
+.withdraw-control input::placeholder { color: #8daed0; opacity: .8; }
 .withdraw-control--amount input { border-color: #66ffff; box-shadow: 0 0 12px #31f4ff, inset 0 0 12px #138bba; font-weight: 700; }
 .withdraw-control input:focus-visible, .withdraw-control select:focus-visible,
 .withdraw-back:focus-visible, .withdraw-open:focus-visible,
@@ -317,7 +318,8 @@ body {
   .withdraw-layout { padding-inline: 10px; }
   .withdraw-intro { padding-right: 82px; }
   .withdraw-wallet-art { right: -23px; width: 135px; }
-  .withdraw-form { padding-inline: 13px; }
+  .withdraw-form { padding-inline: 22px; }
+  .withdraw-brand { left: -10px; right: -10px; }
   .withdraw-open { padding-inline: 8px; font-size: 11px; }
 }
 

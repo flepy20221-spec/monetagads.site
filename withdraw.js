@@ -30,6 +30,18 @@
     message.dataset.kind = kind;
   }
 
+  function validCpf(value) {
+    const digits = value.replace(/\D/g, "");
+    if (digits.length !== 11 || /^(\d)\1{10}$/.test(digits)) return false;
+    for (let position = 9; position <= 10; position++) {
+      let sum = 0;
+      for (let i = 0; i < position; i++) sum += Number(digits[i]) * (position + 1 - i);
+      const check = (sum * 10) % 11;
+      if (Number(digits[position]) !== (check === 10 ? 0 : check)) return false;
+    }
+    return true;
+  }
+
   async function callApi(payload) {
     const initData = window.Telegram?.WebApp?.initData;
     if (!initData) throw new Error("Abra o Mini App pelo Telegram.");
@@ -57,11 +69,12 @@
     rules.textContent = "Um pagamento de R$ 0,05 por dia após 15 vídeos. Se os dados forem devolvidos, você pode corrigir e pedir novamente hoje. Não acumula. FaucetPay recebe USDT convertido na cotação do pedido.";
     amount.value = money.format(0.05);
     const destinationValid = selected === "pix"
-      ? pixKey.value.trim().length >= 5
+      ? pixType.value === "CPF" && validCpf(pixKey.value)
       : /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(faucetEmail.value.trim());
     const valid = Boolean(status?.eligible && status.methods?.includes(selected) && destinationValid);
     submit.disabled = busy || !valid;
-    validation.textContent = "";
+    validation.textContent = selected === "pix" && pixKey.value.replace(/\D/g, "").length === 11 && !destinationValid
+      ? "CPF inválido. Confira os 11 números." : "";
     return valid ? "0.05" : null;
   }
 
@@ -108,6 +121,12 @@
   byId("withdraw-back").addEventListener("click", () => { screen.hidden = true; });
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden && !screen.hidden) void loadStatus();
+  });
+  pixKey.addEventListener("input", () => {
+    const digits = pixKey.value.replace(/\D/g, "").slice(0, 11);
+    pixKey.value = digits.replace(/^(\d{3})(\d)/, "$1.$2")
+      .replace(/^(\d{3})\.(\d{3})(\d)/, "$1.$2.$3")
+      .replace(/^(\d{3})\.(\d{3})\.(\d{3})(\d)/, "$1.$2.$3-$4");
   });
   form.addEventListener("input", () => { requestId = null; validate(); });
   form.addEventListener("change", () => { requestId = null; validate(); });
