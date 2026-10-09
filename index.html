@@ -148,12 +148,12 @@
             <p>Acompanhe seus pedidos de saque no PIX e FaucetPay.</p>
           </div>
           <div class="history-content">
-            <div class="history-stats" aria-label="Resumo dos pedidos">
+            <div id="history-stats" class="history-stats" aria-label="Resumo dos pedidos" hidden>
               <div class="history-stat"><svg aria-hidden="true"><use href="#icon-wallet" /></svg><span>Total de saques<strong id="history-total">0</strong></span></div>
               <div class="history-stat"><svg aria-hidden="true"><use href="#icon-calendar" /></svg><span>Hoje<strong id="history-today">0</strong></span></div>
               <div class="history-stat history-stat--pending"><svg aria-hidden="true"><use href="#icon-clock" /></svg><span>Pendentes<strong id="history-pending">0</strong></span></div>
             </div>
-            <div class="history-filters" role="group" aria-label="Filtrar saques">
+            <div id="history-filters" class="history-filters" role="group" aria-label="Filtrar saques" hidden>
               <button class="history-filter" type="button" data-method="all" aria-pressed="true"><svg aria-hidden="true"><use href="#icon-list" /></svg>Todos</button>
               <button class="history-filter" type="button" data-method="pix" aria-pressed="false"><svg aria-hidden="true"><use href="#icon-pix" /></svg>PIX</button>
               <button class="history-filter" type="button" data-method="faucetpay" aria-pressed="false"><svg aria-hidden="true"><use href="#icon-wallet" /></svg>FaucetPay</button>

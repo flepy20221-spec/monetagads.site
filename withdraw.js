@@ -19,6 +19,8 @@
   const validation = byId("withdraw-validation");
   const submit = byId("withdraw-submit");
   const historyScreen = byId("history-screen");
+  const historyStats = byId("history-stats");
+  const historyFilterBar = byId("history-filters");
   const historyList = byId("history-list");
   const historyMessage = byId("history-message");
   const historyMore = byId("history-more");
@@ -149,6 +151,8 @@
         throw new Error("Resposta inválida do histórico.");
       }
       historyDay = data.day;
+      historyStats.hidden = false;
+      historyFilterBar.hidden = false;
       byId("history-total").textContent = data.summary.total;
       byId("history-today").textContent = data.summary.today;
       byId("history-pending").textContent = data.summary.pending;
@@ -160,6 +164,8 @@
       if (sequence !== historySequence || historyScreen.hidden) return;
       historyMessage.textContent = error.message || "Não foi possível consultar o histórico.";
       historyMessage.dataset.kind = "error";
+      historyStats.hidden = true;
+      historyFilterBar.hidden = true;
       historyMore.hidden = false;
       historyMore.dataset.retry = "true";
       historyMore.textContent = "Tentar novamente";
