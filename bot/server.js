@@ -326,11 +326,13 @@ async function createServer({ botToken, webhookSecret, postbackSecret, adminSecr
       reply(res, 200, { ok: true });
       return;
     }
-    if ((requestUrl.pathname === "/api/app-links" || requestUrl.pathname === "/api/app-links/v2") &&
+    if ((requestUrl.pathname === "/api/app-links" || requestUrl.pathname === "/api/app-links/v2" ||
+         requestUrl.pathname === "/api/app-links/upgrade") &&
         req.method === "POST") {
-      // Only a Telegram callback can bind this opaque token to an account.
+      // A new link needs Telegram confirmation. An existing link also needs
+      // the saved link token plus a verified Young Money account to be upgraded.
       let account = null;
-      if (requestUrl.pathname === "/api/app-links/v2") {
+      if (requestUrl.pathname !== "/api/app-links") {
         if (req.headers.origin) { reply(res, 403, { ok: false }); return; }
         const match = /^Bearer ([A-Za-z0-9._~-]{16,4096})$/.exec(req.headers.authorization || "");
         const deviceId = req.headers["x-youngmoney-device-id"];
@@ -354,6 +356,22 @@ async function createServer({ botToken, webhookSecret, postbackSecret, adminSecr
             account.deviceHash !== crypto.createHash("sha256").update(deviceId).digest("hex")) {
           reply(res, 401, { ok: false }); return;
         }
+      }
+      if (requestUrl.pathname === "/api/app-links/upgrade") {
+        const legacyToken = req.headers["x-youngmoney-link-token"];
+        if (typeof legacyToken !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(legacyToken)) {
+          reply(res, 401, { ok: false }); return;
+        }
+        const tokenHash = crypto.createHash("sha256").update(legacyToken).digest("hex");
+        try {
+          const upgraded = await ledger.verifyExistingLink(tokenHash, account.id, account.deviceHash);
+          reply(res, upgraded ? 200 : 401, upgraded
+            ? { state: "linked", accountId: account.id } : { ok: false });
+        } catch (error) {
+          if (error.status === 409) reply(res, 409, { ok: false });
+          else { console.error("App link upgrade failed:", error.message); reply(res, 503, { ok: false }); }
+        }
+        return;
       }
       for (const [id, link] of pendingLinks) {
         if (link.expiresAt <= Date.now()) pendingLinks.delete(id);

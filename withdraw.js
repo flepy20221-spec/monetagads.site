@@ -91,7 +91,7 @@
     }
     form.hidden = !data.unlocked || !data.settings;
     if (!data.mission_active) setMessage("A missão e o saque do Mini App estão pausados. Aguarde a liberação no painel.");
-    else if (!data.linked) setMessage("Vincule o Telegram à sua conta pelo app Young Money para solicitar saques.");
+    else if (!data.linked) setMessage("Seu Telegram está conectado, mas o vínculo antigo não confirma sua conta Young Money para saques. Atualize o app Young Money e abra o card Mini App para verificar a conta. As impressões de hoje continuam registradas.");
     else if (!data.unlocked) setMessage(`Progresso de hoje: ${data.current}/15. Complete as impressões confirmadas para abrir o saque.`);
     else if (!data.settings.methods.length) setMessage("PIX e FaucetPay estão desativados no painel administrativo.");
     else setMessage("Meta de 15/15 confirmada. Escolha o método e confira seu saldo antes de solicitar.");

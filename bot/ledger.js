@@ -158,12 +158,37 @@ async function createLedger(dataDir, now = () => Date.now()) {
         return true;
       });
     },
+    verifyExistingLink(tokenHash, accountId, deviceHash) {
+      return serialized(async () => {
+        const link = appLinks.get(tokenHash);
+        if (!link || Date.parse(link.expiresAt) <= now()) return false;
+        const boundUser = accountBindings.get(accountId);
+        const boundAccount = telegramBindings.get(link.userId);
+        if ((boundUser && boundUser !== link.userId) ||
+            (boundAccount && boundAccount !== accountId) ||
+            (link.accountId && link.accountId !== accountId)) {
+          const error = new Error("Young Money and Telegram accounts are already linked elsewhere");
+          error.status = 409;
+          throw error;
+        }
+        if (!boundAccount) {
+          await append({ kind: "account_binding", accountId, userId: link.userId,
+            deviceHash, at: new Date(now()).toISOString() });
+          accountBindings.set(accountId, link.userId);
+          telegramBindings.set(link.userId, accountId);
+        }
+        return true;
+      });
+    },
     linkedUser(tokenHash) {
       const link = appLinks.get(tokenHash);
       return link && Date.parse(link.expiresAt) > now() ? link.userId : null;
     },
     linkedAccount(userId) { return telegramBindings.get(userId) || null; },
-    linkAccount(tokenHash) { return appLinks.get(tokenHash)?.accountId || null; },
+    linkAccount(tokenHash) {
+      const link = appLinks.get(tokenHash);
+      return link ? telegramBindings.get(link.userId) || link.accountId || null : null;
+    },
     dailyVideoProgress(userId) {
       const day = brazilDay(now());
       let completed = 0;
