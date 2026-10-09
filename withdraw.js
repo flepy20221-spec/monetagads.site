@@ -18,12 +18,20 @@
   const faucetEmail = byId("withdraw-faucet-email");
   const validation = byId("withdraw-validation");
   const submit = byId("withdraw-submit");
-  const history = byId("withdraw-history");
-  const historyList = byId("withdraw-history-list");
+  const historyScreen = byId("history-screen");
+  const historyList = byId("history-list");
+  const historyMessage = byId("history-message");
+  const historyMore = byId("history-more");
+  const historyTemplate = byId("history-card-template");
+  const historyFilters = [...document.querySelectorAll(".history-filter")];
   const money = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
   let status = null;
   let busy = false;
   let requestId = null;
+  let historyFilter = "all";
+  let historyCursor = null;
+  let historyDay = "";
+  let historySequence = 0;
 
   function setMessage(value, kind = "info") {
     message.textContent = value;
@@ -78,17 +86,85 @@
     return valid ? "0.05" : null;
   }
 
-  function renderHistory(rows) {
-    historyList.replaceChildren();
-    history.hidden = !Array.isArray(rows) || rows.length === 0;
-    if (history.hidden) return;
-    for (const row of rows) {
-      const line = document.createElement("p");
-      const state = { pending: "em análise", paid: "pago", rejected: "devolvido para correção" }[row.status] || row.status;
-      const usdt = row.method === "faucetpay" && row.crypto_amount !== null
-        ? ` · ${Number(row.crypto_amount).toFixed(8)} USDT` : "";
-      line.textContent = `#${row.id} · ${money.format(row.amount_cents / 100)} · ${row.method === "pix" ? "PIX" : "FaucetPay"}${usdt} · ${state}${row.status === "rejected" && row.admin_note ? ` · Motivo: ${row.admin_note}` : ""}`;
-      historyList.append(line);
+  function historyDate(value) {
+    const day = String(value || "").slice(0, 10);
+    const time = String(value || "").slice(11, 16);
+    const yesterday = new Date(`${historyDay}T00:00:00Z`);
+    yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+    const label = day === historyDay ? "Hoje" : day === yesterday.toISOString().slice(0, 10)
+      ? "Ontem" : /^\d{4}-\d{2}-\d{2}$/.test(day) ? `${day.slice(8, 10)}/${day.slice(5, 7)}/${day.slice(0, 4)}` : "Data indisponível";
+    return time ? `${label}, ${time}` : label;
+  }
+
+  function addHistoryCard(row) {
+    const fragment = historyTemplate.content.cloneNode(true);
+    const card = fragment.querySelector(".history-card");
+    const state = {
+      paid: ["Concluído", "#icon-check"],
+      pending: ["Pendente", "#icon-clock"],
+      rejected: ["Devolvido", "#icon-return"]
+    }[row.status] || ["Em análise", "#icon-clock"];
+    card.dataset.status = row.status;
+    fragment.querySelector(".history-card-icon use").setAttribute("href", row.method === "pix" ? "#icon-pix" : "#icon-wallet");
+    fragment.querySelector(".history-card-method").textContent = row.method === "pix" ? "PIX" : "FaucetPay";
+    fragment.querySelector(".history-card-amount").textContent = money.format(Number(row.amount_cents) / 100);
+    fragment.querySelector(".history-card-date span").textContent = historyDate(row.created_at);
+    fragment.querySelector(".history-card-destination").textContent = row.destination || "Dados do pagamento indisponíveis";
+    fragment.querySelector(".history-card-status use").setAttribute("href", state[1]);
+    fragment.querySelector(".history-card-status span").textContent = state[0];
+    fragment.querySelector(".history-card-id").textContent = `Pedido #${row.id}`;
+    const crypto = fragment.querySelector(".history-card-crypto");
+    if (row.method === "faucetpay" && Number(row.crypto_amount) > 0) {
+      crypto.hidden = false;
+      crypto.textContent = `${Number(row.crypto_amount).toFixed(8)} USDT`;
+    }
+    const note = fragment.querySelector(".history-card-note");
+    if (row.status === "rejected" && row.admin_note) {
+      note.hidden = false;
+      note.textContent = `Motivo da devolução: ${row.admin_note}`;
+    }
+    historyList.append(fragment);
+  }
+
+  async function loadHistory(reset = false) {
+    const sequence = ++historySequence;
+    if (reset) {
+      historyCursor = null;
+      historyList.replaceChildren();
+      historyMore.hidden = true;
+      historyMessage.textContent = "Carregando seus pedidos...";
+    } else historyMessage.textContent = "Carregando mais pedidos...";
+    historyMore.dataset.retry = "false";
+    historyMore.textContent = "Carregar mais pedidos";
+    historyMessage.dataset.kind = "info";
+    historyMore.disabled = true;
+    try {
+      const data = await callApi({ action: "history", method: historyFilter,
+        ...(historyCursor === null ? {} : { cursor: historyCursor }) });
+      if (sequence !== historySequence || historyScreen.hidden) return;
+      if (!Array.isArray(data.history) || !data.summary ||
+          !Number.isInteger(data.summary.total) || !Number.isInteger(data.summary.today) ||
+          !Number.isInteger(data.summary.pending) ||
+          (data.next_cursor !== null && !Number.isInteger(data.next_cursor))) {
+        throw new Error("Resposta inválida do histórico.");
+      }
+      historyDay = data.day;
+      byId("history-total").textContent = data.summary.total;
+      byId("history-today").textContent = data.summary.today;
+      byId("history-pending").textContent = data.summary.pending;
+      for (const row of data.history) addHistoryCard(row);
+      historyCursor = data.next_cursor;
+      historyMore.hidden = historyCursor === null;
+      historyMessage.textContent = historyList.childElementCount === 0 ? "Nenhum pedido de saque encontrado." : "";
+    } catch (error) {
+      if (sequence !== historySequence || historyScreen.hidden) return;
+      historyMessage.textContent = error.message || "Não foi possível consultar o histórico.";
+      historyMessage.dataset.kind = "error";
+      historyMore.hidden = false;
+      historyMore.dataset.retry = "true";
+      historyMore.textContent = "Tentar novamente";
+    } finally {
+      if (sequence === historySequence) historyMore.disabled = false;
     }
   }
 
@@ -107,20 +183,44 @@
     else if (data.returned_today) setMessage(`Seu pedido foi devolvido${data.return_reason ? `: ${data.return_reason}` : "."} Corrija os dados e solicite novamente hoje. O direito de saque não passa para amanhã.`);
     else if (!data.eligible) setMessage(`Vídeos de hoje: ${data.current}/${data.goal}. Complete 15 para solicitar R$ 0,05 hoje; não acumula para amanhã.`);
     else setMessage("Meta de 15 vídeos concluída. Escolha PIX ou FaucetPay para solicitar R$ 0,05 hoje.");
-    renderHistory(data.history);
     validate();
   }
 
   async function loadStatus() {
     setMessage("Consultando os vídeos de hoje...");
     try { render(await callApi({ action: "status" })); }
-    catch (error) { status = null; form.hidden = true; history.hidden = true; setMessage(error.message, "error"); }
+    catch (error) { status = null; form.hidden = true; setMessage(error.message, "error"); }
   }
 
   openButton.addEventListener("click", () => { screen.hidden = false; screen.scrollTop = 0; void loadStatus(); });
   byId("withdraw-back").addEventListener("click", () => { screen.hidden = true; });
+  byId("withdraw-history-open").addEventListener("click", () => {
+    screen.hidden = true;
+    historyScreen.hidden = false;
+    historyScreen.scrollTop = 0;
+    byId("history-back").focus();
+    void loadHistory(true);
+  });
+  byId("history-back").addEventListener("click", () => {
+    ++historySequence;
+    historyScreen.hidden = true;
+    screen.hidden = false;
+    byId("withdraw-history-open").focus();
+    void loadStatus();
+  });
+  for (const button of historyFilters) button.addEventListener("click", () => {
+    if (historyFilter === button.dataset.method) return;
+    historyFilter = button.dataset.method;
+    for (const filter of historyFilters) filter.setAttribute("aria-pressed", String(filter === button));
+    void loadHistory(true);
+  });
+  historyMore.addEventListener("click", () => {
+    if (!historyMore.disabled && (historyCursor !== null || historyMore.dataset.retry === "true"))
+      void loadHistory(historyCursor === null);
+  });
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden && !screen.hidden) void loadStatus();
+    else if (!document.hidden && !historyScreen.hidden) void loadHistory(true);
   });
   pixKey.addEventListener("input", () => {
     const digits = pixKey.value.replace(/\D/g, "").slice(0, 11);
