@@ -193,9 +193,11 @@ async function createLedger(dataDir, now = () => Date.now()) {
       const day = brazilDay(now());
       const byDay = new Map();
       for (const row of completions.values()) {
-        if (row.userId !== userId || !impressions.has(row.ymid)) continue;
-        const completedDay = brazilDay(row.at);
-        byDay.set(completedDay, (byDay.get(completedDay) || 0) + 1);
+        const attempt = attempts.get(row.ymid);
+        if (row.userId !== userId || !attempt || !impressions.has(row.ymid)) continue;
+        // A delayed completion/postback still belongs to the day the video started.
+        const videoDay = brazilDay(attempt.at);
+        byDay.set(videoDay, (byDay.get(videoDay) || 0) + 1);
       }
       return { day, completed: Math.min(byDay.get(day) || 0, 15), goal: 15,
         rewardDays: [...byDay].filter(([, count]) => count >= 15)

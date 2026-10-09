@@ -69,6 +69,23 @@ test("confirmed impressions use server time in Sao Paulo and survive storage cle
   }
 });
 
+test("a completion delivered after midnight stays on the day its video started", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "young-money-late-video-"));
+  let time = Date.parse("2026-10-08T02:59:30.000Z");
+  try {
+    const ledger = await createLedger(dir, () => time);
+    const ymid = await ledger.createAttempt("123");
+    await ledger.recordAdEvent({ ymid, userId: "123", event: "impression",
+      valued: false, price: 0, zone: "11977205", source: "daily_video" });
+    time = Date.parse("2026-10-08T03:00:30.000Z");
+    await ledger.recordCompletion("123", ymid);
+    assert.equal(ledger.counts("123").completedVideos, 0);
+    assert.deepEqual(ledger.counts("123").rewardDays, []);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("account binding is permanent, one-to-one and preserved after restart", async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "young-money-binding-"));
   try {
