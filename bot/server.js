@@ -244,7 +244,13 @@ async function createServer({ botToken, webhookSecret, postbackSecret, adminSecr
       },
       signal: AbortSignal.timeout(8000)
     });
-    if (response.status === 401 || response.status === 403) return null;
+    if (response.status === 401) return { verificationError: "ACCOUNT_NOT_AUTHENTICATED" };
+    if (response.status === 403) {
+      const body = await response.json().catch(() => ({}));
+      return { verificationError: body?.message === "Device not registered"
+        ? "DEVICE_NOT_REGISTERED"
+        : body?.code === "SHIELD30_BLOCKED" ? "SHIELD30_BLOCKED" : "IDENTITY_FORBIDDEN" };
+    }
     if (!response.ok) throw new Error(`Young Money identity unavailable (${response.status})`);
     const payload = await response.json();
     return payload.status === "success" ? payload.data : null;
@@ -351,6 +357,11 @@ async function createServer({ botToken, webhookSecret, postbackSecret, adminSecr
         catch (error) {
           console.error("Young Money identity check failed:", error.message);
           reply(res, 503, { ok: false }); return;
+        }
+        if (account?.verificationError) {
+          const code = account.verificationError;
+          const status = code === "ACCOUNT_NOT_AUTHENTICATED" ? 401 : 403;
+          reply(res, status, { ok: false, code }); return;
         }
         if (!account || !Number.isSafeInteger(account.id) || account.id <= 0 ||
             account.deviceHash !== crypto.createHash("sha256").update(deviceId).digest("hex")) {

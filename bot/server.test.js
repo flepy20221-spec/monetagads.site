@@ -419,6 +419,24 @@ test("v2 link verifies the Young Money token and preserves one account per Teleg
   });
 });
 
+test("v2 reports a device verification failure without calling it an expired account", async () => {
+  const deviceId = "v4" + "a".repeat(62);
+  await withServer(async base => {
+    const response = await fetch(base + "/api/app-links/v2", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer valid-youngmoney-token",
+        "x-youngmoney-device-id": deviceId,
+        "x-shield-request-path": "/api/v1/telegram/identity.php",
+        "x-shield-request-method": "POST",
+        "x-shield-device-id": deviceId
+      }
+    });
+    assert.equal(response.status, 403);
+    assert.equal((await response.json()).code, "DEVICE_NOT_REGISTERED");
+  }, { getYoungMoneyAccount: async () => ({ verificationError: "DEVICE_NOT_REGISTERED" }) });
+});
+
 test("an existing Telegram link can be upgraded only with its token and verified Young Money identity", async () => {
   const deviceId = "v4" + "a".repeat(62);
   const proof = {
