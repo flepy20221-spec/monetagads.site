@@ -8,6 +8,7 @@
   const message = byId("withdraw-message");
   const form = byId("withdraw-form");
   const method = byId("withdraw-method");
+  const methodIcon = document.querySelector("#withdraw-method-icon use");
   const amount = byId("withdraw-amount");
   const rules = byId("withdraw-rules");
   const pixFields = byId("withdraw-pix-fields");
@@ -50,6 +51,7 @@
 
   function validate() {
     const selected = method.value;
+    methodIcon.setAttribute("href", selected === "pix" ? "#icon-pix" : "#icon-mail");
     pixFields.hidden = selected !== "pix";
     faucetFields.hidden = selected !== "faucetpay";
     rules.textContent = "Um pagamento de R$ 0,05 por dia após 15 vídeos. Se os dados forem devolvidos, você pode corrigir e pedir novamente hoje. Não acumula. FaucetPay recebe USDT convertido na cotação do pedido.";
@@ -102,7 +104,7 @@
     catch (error) { status = null; form.hidden = true; history.hidden = true; setMessage(error.message, "error"); }
   }
 
-  openButton.addEventListener("click", () => { screen.hidden = false; void loadStatus(); });
+  openButton.addEventListener("click", () => { screen.hidden = false; screen.scrollTop = 0; void loadStatus(); });
   byId("withdraw-back").addEventListener("click", () => { screen.hidden = true; });
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden && !screen.hidden) void loadStatus();

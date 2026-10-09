@@ -12,7 +12,7 @@
   const countA11y = document.getElementById("count-a11y");
   const slots = document.getElementById("completed-slots");
   const notice = document.getElementById("notice");
-  const accountStatus = document.getElementById("account-status");
+  const accountStatus = document.getElementById("account-status-text");
   let inFlight = false;
   let noticeTimer;
   let progress = null;
