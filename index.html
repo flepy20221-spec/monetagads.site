@@ -11,7 +11,7 @@
     <script src="https://telegram.org/js/telegram-web-app.js" defer></script>
     <script src="https://libtl.com/sdk.js" data-zone="11977205" data-sdk="show_11977205" defer></script>
     <script src="./app.js?v=mini-wallet-v3" defer></script>
-    <script src="./withdraw.js?v=mini-wallet-v2" defer></script>
+    <script src="./withdraw.js?v=mini-wallet-v3" defer></script>
   </head>
   <body>
     <main class="scene" aria-labelledby="page-title">
@@ -70,8 +70,8 @@
             <option value="faucetpay">FaucetPay · USDT</option>
           </select>
           <p id="withdraw-rules" class="withdraw-rules"></p>
-          <label for="withdraw-amount">Valor em reais (R$)</label>
-          <input id="withdraw-amount" name="amount" type="text" inputmode="decimal" autocomplete="off" placeholder="0,05" required />
+          <label for="withdraw-amount">Valor fixo por saque</label>
+          <input id="withdraw-amount" name="amount" type="text" value="R$ 0,05" readonly />
           <div id="withdraw-pix-fields" class="withdraw-fields">
             <label for="withdraw-pix-type">Tipo de chave PIX</label>
             <select id="withdraw-pix-type" name="pix_type">
@@ -89,7 +89,7 @@
             <p>Pagamento em USDT. A cotação é confirmada no servidor ao solicitar.</p>
           </div>
           <p id="withdraw-validation" class="withdraw-validation" role="status"></p>
-          <button id="withdraw-submit" class="withdraw-submit" type="submit" disabled>Solicitar análise do saque</button>
+          <button id="withdraw-submit" class="withdraw-submit" type="submit" disabled>Solicitar saque de R$ 0,05</button>
           <p class="withdraw-footnote">Ao completar 15 vídeos confirmados no dia, entram R$ 0,05 nesta carteira. PIX e FaucetPay são analisados no painel Young Money; o pagamento é feito pelo administrador.</p>
         </form>
         <div id="withdraw-history" class="withdraw-wallet" hidden>

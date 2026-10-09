@@ -55,21 +55,17 @@
     const selected = method.value;
     pixFields.hidden = selected !== "pix";
     faucetFields.hidden = selected !== "faucetpay";
-    rules.textContent = "Mínimo de R$ 0,05. Saque em múltiplos de R$ 0,05 até o saldo disponível. FaucetPay recebe USDT convertido na cotação do pedido.";
-    const normalized = amount.value.trim().replace(",", ".");
-    const amountValid = /^(?:0|[1-9]\d{0,5})(?:\.\d{1,2})?$/.test(normalized);
-    const cents = amountValid ? Math.round(Number(normalized) * 100) : 0;
+    rules.textContent = "Cada saque é de R$ 0,05. Se acumular mais saldo, poderá solicitar outro saque. FaucetPay recebe USDT convertido na cotação do pedido.";
+    amount.value = money.format(0.05);
     const destinationValid = selected === "pix"
       ? pixKey.value.trim().length >= 5
       : /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(faucetEmail.value.trim());
-    const valid = Boolean(status?.unlocked && status.methods?.includes(selected) &&
-      cents >= 5 && cents % 5 === 0 && cents <= status.balance_cents && destinationValid);
+    const valid = Boolean(status?.unlocked && status.balance_cents >= 5 &&
+      status.methods?.includes(selected) && destinationValid);
     submit.disabled = busy || !valid;
-    validation.textContent = !status?.unlocked || !amount.value.trim() ? "" :
-      !amountValid ? "Informe um valor válido com até duas casas decimais." :
-      cents < 5 || cents % 5 !== 0 ? "Use R$ 0,05 ou um múltiplo desse valor." :
-      cents > status.balance_cents ? "Saldo insuficiente para este saque." : "";
-    return valid ? normalized : null;
+    validation.textContent = status && status.balance_cents < 5
+      ? "Complete 15 vídeos confirmados para juntar R$ 0,05 e liberar o saque." : "";
+    return valid ? "0.05" : null;
   }
 
   function renderHistory(rows) {
@@ -94,10 +90,9 @@
     wallet.hidden = false;
     balance.textContent = money.format(data.balance_cents / 100);
     balanceDetail.textContent = `Meta de hoje: ${data.current}/${data.goal} vídeos · +${money.format(data.reward_cents / 100)} ao completar`;
-    form.hidden = !data.unlocked || data.methods.length === 0;
+    form.hidden = data.methods.length === 0;
     for (const option of method.options) option.disabled = !data.methods.includes(option.value);
     if (data.methods.length && method.selectedOptions[0]?.disabled) method.value = data.methods[0];
-    if (data.unlocked && !amount.value.trim()) amount.value = (data.balance_cents / 100).toFixed(2).replace(".", ",");
     if (!data.unlocked) setMessage(`Progresso de hoje: ${data.current}/${data.goal}. Complete 15 vídeos para ganhar R$ 0,05. O saldo acumulado fica disponível para saque.`);
     else setMessage("Escolha PIX ou FaucetPay para solicitar o saque do saldo da Mini App.");
     renderHistory(data.history);
@@ -137,7 +132,6 @@
     try {
       const result = await callApi(payload);
       requestId = null;
-      amount.value = "";
       await loadStatus();
       setMessage(`Saque #${result.withdrawal_id} solicitado. Aguarde a análise no painel.`);
     } catch (error) {
