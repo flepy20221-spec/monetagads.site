@@ -6,7 +6,7 @@ const crypto = require("node:crypto");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
-const { createServer, fetchTelegramPhoto, configureTelegramWebhook, configureChatMenu, clearBotDescription } = require("./server");
+const { createServer, fetchTelegramPhoto, configureTelegramWebhook, configureChatMenu, clearBotDescription, lookupYoungMoneyAccount } = require("./server");
 
 const config = {
   botToken: "test-token",
@@ -435,6 +435,17 @@ test("v2 reports a device verification failure without calling it an expired acc
     assert.equal(response.status, 403);
     assert.equal((await response.json()).code, "DEVICE_NOT_REGISTERED");
   }, { getYoungMoneyAccount: async () => ({ verificationError: "DEVICE_NOT_REGISTERED" }) });
+});
+
+test("identity responses sent with HTTP 200 still distinguish an unbound device from an invalid session", async () => {
+  const lookup = body => lookupYoungMoneyAccount("test-token", "v4" + "a".repeat(62), {},
+    async () => new Response(JSON.stringify(body), { status: 200 }));
+  assert.equal((await lookup({ status: "error", message: "Device not registered" })).verificationError,
+    "DEVICE_NOT_REGISTERED");
+  assert.equal((await lookup({ status: "error", message: "Unauthorized" })).verificationError,
+    "ACCOUNT_NOT_AUTHENTICATED");
+  assert.deepEqual(await lookup({ status: "success", data: { id: 42, deviceHash: "valid" } }),
+    { id: 42, deviceHash: "valid" });
 });
 
 test("an existing Telegram link can be upgraded only with its token and verified Young Money identity", async () => {

@@ -218,6 +218,33 @@ function makeMessage(update, webAppUrl, ledger) {
   };
 }
 
+async function lookupYoungMoneyAccount(token, deviceId, shieldHeaders, request = fetch) {
+  const base = process.env.YOUNGMONEY_API_URL || "https://youngmoney-api-railway-production-5bf3.up.railway.app";
+  const url = new URL("/api/v1/telegram/identity.php", base);
+  if (url.protocol !== "https:" || url.origin !== new URL(base).origin) throw new Error("Invalid Young Money API URL");
+  const response = await request(url, {
+    method: "POST", headers: {
+      ...shieldHeaders,
+      authorization: `Bearer ${token}`, "x-youngmoney-device-id": deviceId
+    },
+    signal: AbortSignal.timeout(8000)
+  });
+  if (response.status === 401) return { verificationError: "ACCOUNT_NOT_AUTHENTICATED" };
+  if (response.status === 403) {
+    const body = await response.json().catch(() => ({}));
+    return { verificationError: body?.message === "Device not registered"
+      ? "DEVICE_NOT_REGISTERED"
+      : body?.code === "SHIELD30_BLOCKED" ? "SHIELD30_BLOCKED" : "IDENTITY_FORBIDDEN" };
+  }
+  if (!response.ok) throw new Error(`Young Money identity unavailable (${response.status})`);
+  const payload = await response.json();
+  if (payload.status === "success") return payload.data;
+  if (payload.message === "Unauthorized") return { verificationError: "ACCOUNT_NOT_AUTHENTICATED" };
+  if (payload.message === "Device not registered") return { verificationError: "DEVICE_NOT_REGISTERED" };
+  if (payload.code === "SHIELD30_BLOCKED") return { verificationError: "SHIELD30_BLOCKED" };
+  throw new Error("Unexpected Young Money identity response");
+}
+
 async function createServer({ botToken, webhookSecret, postbackSecret, adminSecret, webAppUrl, dataDir, sendMessage, answerCallback, setChatMenu, getTelegramChat, getTelegramPhoto, getYoungMoneyAccount }) {
   if (!botToken || !/^[A-Za-z0-9_-]{16,256}$/.test(webhookSecret || "") ||
       !/^[A-Za-z0-9_-]{32,256}$/.test(postbackSecret || "")) {
@@ -233,28 +260,7 @@ async function createServer({ botToken, webhookSecret, postbackSecret, adminSecr
   const menuConfiguredForChat = new Set();
   const pendingLinks = new Map();
   const lookupPhoto = getTelegramPhoto || (userId => fetchTelegramPhoto(botToken, userId));
-  const lookupAccount = getYoungMoneyAccount || (async (token, deviceId, shieldHeaders) => {
-    const base = process.env.YOUNGMONEY_API_URL || "https://youngmoney-api-railway-production-5bf3.up.railway.app";
-    const url = new URL("/api/v1/telegram/identity.php", base);
-    if (url.protocol !== "https:" || url.origin !== new URL(base).origin) throw new Error("Invalid Young Money API URL");
-    const response = await fetch(url, {
-      method: "POST", headers: {
-        ...shieldHeaders,
-        authorization: `Bearer ${token}`, "x-youngmoney-device-id": deviceId
-      },
-      signal: AbortSignal.timeout(8000)
-    });
-    if (response.status === 401) return { verificationError: "ACCOUNT_NOT_AUTHENTICATED" };
-    if (response.status === 403) {
-      const body = await response.json().catch(() => ({}));
-      return { verificationError: body?.message === "Device not registered"
-        ? "DEVICE_NOT_REGISTERED"
-        : body?.code === "SHIELD30_BLOCKED" ? "SHIELD30_BLOCKED" : "IDENTITY_FORBIDDEN" };
-    }
-    if (!response.ok) throw new Error(`Young Money identity unavailable (${response.status})`);
-    const payload = await response.json();
-    return payload.status === "success" ? payload.data : null;
-  });
+  const lookupAccount = getYoungMoneyAccount || lookupYoungMoneyAccount;
 
   function linkTokenHash(req) {
     const match = /^Bearer ([A-Za-z0-9_-]{43})$/.exec(req.headers.authorization || "");
@@ -655,4 +661,4 @@ if (require.main === module) {
   })).catch(error => { console.error("Startup failed:", error); process.exitCode = 1; });
 }
 
-module.exports = { createServer, makeMessage, verifyInitData, fetchTelegramPhoto, configureTelegramWebhook, configureChatMenu, clearBotDescription };
+module.exports = { createServer, makeMessage, verifyInitData, fetchTelegramPhoto, configureTelegramWebhook, configureChatMenu, clearBotDescription, lookupYoungMoneyAccount };
