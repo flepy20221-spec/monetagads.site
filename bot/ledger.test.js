@@ -56,6 +56,7 @@ test("confirmed impressions use server time in Sao Paulo and survive storage cle
       valued: false, price: 0, zone: "11977205", source: "daily_video" });
     assert.equal(ledger.counts("123").today, "2026-10-07");
     assert.equal(ledger.counts("123").todayTotal, 1);
+    assert.equal(ledger.counts("123").completedVideos, 0);
     assert.equal(ledger.counts("123").resetAt, "2026-10-08T03:00:00.000Z");
     ledger = await createLedger(dir, () => time);
     assert.equal(ledger.counts("123").todayTotal, 1);
@@ -64,6 +65,28 @@ test("confirmed impressions use server time in Sao Paulo and survive storage cle
     assert.equal(ledger.counts("123").todayTotal, 0);
     assert.equal(ledger.counts("123").total, 1);
     assert.equal(ledger.counts("123").today, "2026-10-08");
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("confirmed videos saved by the previous version remain counted and unlock the daily reward", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "young-money-legacy-videos-"));
+  const time = Date.parse("2026-10-09T18:00:00.000Z");
+  try {
+    const rows = [];
+    for (let index = 0; index < 15; index++) {
+      const ymid = `legacy-${index}`;
+      rows.push({ kind: "attempt", ymid, userId: "123", at: "2026-10-09T15:00:00.000Z" });
+      rows.push({ kind: "impression", ymid, userId: "123", valued: true,
+        price: 0.001, at: "2026-10-09T15:01:00.000Z" });
+    }
+    await fs.writeFile(path.join(dir, "ad-events.jsonl"), rows.map(row => JSON.stringify(row)).join("\n") + "\n");
+    const ledger = await createLedger(dir, () => time);
+    assert.equal(ledger.counts("123").completedVideos, 15);
+    assert.deepEqual(ledger.counts("123").rewardDays, ["2026-10-09"]);
+    assert.equal(ledger.report("123").selected.completedVideos, 15);
+    await assert.rejects(ledger.createAttempt("123"), error => error.status === 409);
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }

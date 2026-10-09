@@ -248,6 +248,14 @@ test("admin photo endpoint serves a small Telegram thumbnail without exposing th
 test("video total counts one signed SDK completion only after a Monetag impression and survives restart", async () => {
   await withServer(async (base, _sent, dataDir) => {
     const headers = { origin: "https://example.com", "x-telegram-init-data": initData(123, { first_name: "Ana" }) };
+    const preflight = await fetch(`${base}/api/ad-completions`, {
+      method: "OPTIONS", headers: { origin: "https://example.com",
+        "access-control-request-method": "POST",
+        "access-control-request-headers": "content-type,x-telegram-init-data" }
+    });
+    assert.equal(preflight.status, 204);
+    assert.match(preflight.headers.get("access-control-allow-headers"), /content-type/);
+    assert.match(preflight.headers.get("access-control-allow-headers"), /x-telegram-init-data/);
     const { ymid } = await (await fetch(`${base}/api/ad-attempts`, { method: "POST", headers })).json();
     const completionUrl = `${base}/api/ad-completions`;
     const completion = { method: "POST", headers: { ...headers, "content-type": "application/json" }, body: JSON.stringify({ ymid }) };

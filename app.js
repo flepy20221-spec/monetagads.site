@@ -263,7 +263,9 @@
   render();
   void syncPending();
   void refreshProgress().catch(showProgressError);
-  setInterval(() => { if (!document.hidden) void refreshProgress().catch(showProgressError); }, 30000);
+  setInterval(() => {
+    if (!document.hidden) void syncPending().then(refreshProgress).catch(showProgressError);
+  }, 30000);
   if (secondsRemaining()) scheduleCooldownTimer();
 })();
 

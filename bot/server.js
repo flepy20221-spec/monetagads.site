@@ -470,7 +470,7 @@ async function createServer({ botToken, webhookSecret, postbackSecret, adminSecr
       res.setHeader("access-control-allow-origin", allowedOrigin);
       res.setHeader("vary", "Origin");
       if (req.method === "OPTIONS") {
-        res.writeHead(204, { "access-control-allow-methods": "GET, POST, OPTIONS", "access-control-allow-headers": "x-telegram-init-data", "access-control-max-age": "600" });
+        res.writeHead(204, { "access-control-allow-methods": "GET, POST, OPTIONS", "access-control-allow-headers": "content-type, x-telegram-init-data", "access-control-max-age": "600" });
         res.end();
         return;
       }

@@ -104,6 +104,7 @@ async function createLedger(dataDir, now = () => Date.now()) {
         }
         const row = {
           kind: "attempt", ymid: crypto.randomUUID(), userId, at: new Date(timestamp).toISOString(),
+          completionVersion: 2,
           ...(profile?.name ? { name: profile.name, username: profile.username || null } : {})
         };
         await append(row);
@@ -192,10 +193,12 @@ async function createLedger(dataDir, now = () => Date.now()) {
     dailyVideoProgress(userId) {
       const day = brazilDay(now());
       const byDay = new Map();
-      for (const row of completions.values()) {
+      for (const row of impressions.values()) {
         const attempt = attempts.get(row.ymid);
-        if (row.userId !== userId || !attempt || !impressions.has(row.ymid)) continue;
-        // A delayed completion/postback still belongs to the day the video started.
+        if (row.userId !== userId || !attempt ||
+            (attempt.completionVersion === 2 && !completions.has(row.ymid))) continue;
+        // Earlier versions saved confirmed impressions without a usable completion request.
+        // The marker preserves those watched videos without granting a new impression twice.
         const videoDay = brazilDay(attempt.at);
         byDay.set(videoDay, (byDay.get(videoDay) || 0) + 1);
       }
@@ -269,8 +272,9 @@ async function createLedger(dataDir, now = () => Date.now()) {
           ads.set(row.ymid, ad);
         }
       }
-      for (const row of completions.values()) {
-        if (!impressions.has(row.ymid)) continue;
+      for (const row of impressions.values()) {
+        const attempt = attempts.get(row.ymid);
+        if (!attempt || (attempt.completionVersion === 2 && !completions.has(row.ymid))) continue;
         const user = users.get(row.userId);
         if (!user) continue;
         user.completedVideos++;
