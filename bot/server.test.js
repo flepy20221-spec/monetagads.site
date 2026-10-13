@@ -105,7 +105,7 @@ test("bot clears the chat intro description in default and Portuguese", async ()
   assert.deepEqual(cleared, ["default", "pt"]);
 });
 
-test("private /start returns the Mini App button and privacy link", async () => {
+test("private /start and /ajuda show the named Mini App and a separate privacy link", async () => {
   const menus = [];
   await withServer(async (base, sent) => {
     const response = await fetch(`${base}/telegram/webhook`, {
@@ -115,9 +115,18 @@ test("private /start returns the Mini App button and privacy link", async () => 
     });
     assert.equal(response.status, 200);
     assert.equal(sent[0].chat_id, 123);
+    assert.equal(sent[0].reply_markup.inline_keyboard[0][0].text, "Mini App - Young Money");
     assert.equal(sent[0].reply_markup.inline_keyboard[0][0].web_app.url, config.webAppUrl);
     assert.equal(sent[0].reply_markup.inline_keyboard[1][0].url, `${config.webAppUrl}privacy.html`);
     assert.match(sent[0].text, /Olá, Ana Silva!/);
+    assert.match(sent[0].text, /Mini Apps disponíveis/);
+    const help = await fetch(`${base}/telegram/webhook`, {
+      method: "POST",
+      headers: { "x-telegram-bot-api-secret-token": config.webhookSecret },
+      body: JSON.stringify({ message: { chat: { id: 123, type: "private" }, from: { id: 123, first_name: "Ana" }, text: "/ajuda" } })
+    });
+    assert.equal(help.status, 200);
+    assert.deepEqual(sent[1].reply_markup, sent[0].reply_markup);
     assert.deepEqual(menus, [123]);
   }, { setChatMenu: async chatId => menus.push(chatId) });
 });
@@ -314,7 +323,9 @@ test("Telegram link card shows completed videos only after SDK completion and im
     assert.equal((await (await fetch(statusUrl, { headers: auth })).json()).state, "pending");
     await webhook({ callback_query: { id: "good", data: `connect:${id}`, from: { id: 123, first_name: "Ana" }, message: { chat: { id: 123, type: "private" } } } });
     assert.equal(answers.at(-1).text.startsWith("Conta vinculada"), true);
-    assert.match(sent.at(-1).text, /^Ana, seu Telegram foi vinculado/);
+    assert.match(sent.at(-1).text, /^Ana, sua conta foi vinculada/);
+    assert.equal(sent.at(-1).reply_markup.inline_keyboard[0][0].text, "Mini App - Young Money");
+    assert.equal(sent.at(-1).reply_markup.inline_keyboard[0][0].web_app.url, config.webAppUrl);
     let progress = await (await fetch(statusUrl, { headers: auth })).json();
     assert.equal(progress.state, "linked");
     assert.equal(progress.completed, 0);

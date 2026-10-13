@@ -33,6 +33,13 @@ function displayName(user) {
   return profileFromTelegram(user)?.name || "usuário";
 }
 
+function miniAppsMenu(webAppUrl) {
+  return { inline_keyboard: [
+    [{ text: "Mini App - Young Money", web_app: { url: webAppUrl } }],
+    [{ text: "Privacidade", url: new URL("privacy.html", webAppUrl).toString() }]
+  ] };
+}
+
 async function fetchTelegramPhoto(botToken, userId, request = fetch) {
   const signal = AbortSignal.timeout(6500);
   const photosUrl = new URL(`https://api.telegram.org/bot${botToken}/getUserProfilePhotos`);
@@ -207,14 +214,14 @@ function makeMessage(update, webAppUrl, ledger) {
   if (command === "ajuda") {
     return {
       chat_id: message.chat.id,
-      text: "Abra a Mini App para assistir 15 vídeos por dia. Ao completar a meta confirmada, você pode solicitar R$ 0,05 por PIX ou FaucetPay. Um pagamento por dia. Se os dados estiverem errados, corrija o pedido devolvido no mesmo dia. Não acumula para amanhã. Use /status para consultar o progresso.",
-      reply_markup: { inline_keyboard: [[{ text: "🚀 Abrir Mini App", web_app: { url: webAppUrl } }], [{ text: "Privacidade", url: privacyUrl }]] }
+      text: "Mini Apps disponíveis\n\nYoung Money: assista 15 vídeos confirmados no dia para solicitar R$ 0,05 por PIX ou FaucetPay. O saque é separado dos pontos do aplicativo, limitado a um pedido por dia e não acumula. Se o pedido for devolvido por dados incorretos, você pode corrigir no mesmo dia. Use /status para consultar seu progresso.",
+      reply_markup: miniAppsMenu(webAppUrl)
     };
   }
   return {
     chat_id: message.chat.id,
-    text: `Olá, ${displayName(message.from)}! Bem-vindo ao Young Money. Abra a Mini App para assistir aos vídeos disponíveis e acompanhar seu limite diário de até 15 vídeos.`,
-    reply_markup: { inline_keyboard: [[{ text: "🚀 Abrir Mini App", web_app: { url: webAppUrl } }], [{ text: "Privacidade", url: privacyUrl }]] }
+    text: `Olá, ${displayName(message.from)}!\n\nMini Apps disponíveis\nYoung Money: acompanhe seus vídeos e sua recompensa diária. O saque da Mini App é separado dos pontos do aplicativo.`,
+    reply_markup: miniAppsMenu(webAppUrl)
   };
 }
 
@@ -585,7 +592,7 @@ async function createServer({ botToken, webhookSecret, postbackSecret, adminSecr
             linked ? "Conta vinculada. Volte ao aplicativo Young Money." : "Vínculo expirado. Abra o aplicativo para gerar outro.",
           show_alert: !linked
         });
-        if (linked) await send({ chat_id: userId, text: `${displayName(callback.from)}, seu Telegram foi vinculado ao card Mini App. O saque diário da Mini App é separado dos pontos Young Money.`, reply_markup: { inline_keyboard: [[{ text: "🚀 Abrir Mini App", web_app: { url: appUrl } }]] } });
+        if (linked) await send({ chat_id: userId, text: `${displayName(callback.from)}, sua conta foi vinculada.\n\nMini Apps disponíveis\nYoung Money: o saque diário da Mini App é separado dos pontos do aplicativo.`, reply_markup: miniAppsMenu(appUrl) });
         reply(res, 200, { ok: true });
         return;
       }
