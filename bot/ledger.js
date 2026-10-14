@@ -4,6 +4,18 @@ const crypto = require("node:crypto");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 
+// Each of the 15 credited actions must bring in at least US$0.002 in a
+// confirmed Monetag event. This reserves at least US$0.03 in estimated gross
+// revenue before the fixed R$0.05 withdrawal becomes available.
+const configuredFloor = Number(process.env.MONETAG_MIN_CREDITABLE_USD);
+const MIN_CREDITABLE_PRICE_USD = Number.isFinite(configuredFloor) && configuredFloor > 0
+  ? Math.max(0.002, configuredFloor) : 0.002;
+
+function creditableEvent(row, attempt) {
+  return row?.valued === true && Number.isFinite(row.price) &&
+    row.price >= (attempt.minPriceUsd || 0.002) - 1e-10;
+}
+
 const brazilDayFormatter = new Intl.DateTimeFormat("en-US", {
   timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit"
 });
@@ -86,7 +98,7 @@ async function createLedger(dataDir, now = () => Date.now()) {
     }
   }
   return {
-    createAttempt(userId, profile = null) {
+    createAttempt(userId, profile = null, format = "end") {
       return serialized(async () => {
         const timestamp = now();
         if (this.dailyVideoProgress(userId).completed >= 15) {
@@ -104,7 +116,7 @@ async function createLedger(dataDir, now = () => Date.now()) {
         }
         const row = {
           kind: "attempt", ymid: crypto.randomUUID(), userId, at: new Date(timestamp).toISOString(),
-          completionVersion: 2,
+          completionVersion: 3, format, minPriceUsd: MIN_CREDITABLE_PRICE_USD,
           ...(profile?.name ? { name: profile.name, username: profile.username || null } : {})
         };
         await append(row);
@@ -193,15 +205,23 @@ async function createLedger(dataDir, now = () => Date.now()) {
     dailyVideoProgress(userId) {
       const day = brazilDay(now());
       let completed = 0;
-      for (const row of impressions.values()) {
-        const attempt = attempts.get(row.ymid);
-        if (row.userId !== userId || !attempt ||
-            (attempt.completionVersion === 2 && !completions.has(row.ymid))) continue;
-        // Earlier versions saved confirmed impressions without a usable completion request.
-        // The marker preserves those watched videos without granting a new impression twice.
-        if (brazilDay(attempt.at) === day) completed++;
+      for (const attempt of attempts.values()) {
+        if (attempt.userId !== userId || brazilDay(attempt.at) !== day ||
+            !this.isCredited(attempt.ymid)) continue;
+        completed++;
       }
       return { day, completed: Math.min(completed, 15), goal: 15 };
+    },
+    isCredited(ymid) {
+      const attempt = attempts.get(ymid);
+      if (!attempt) return false;
+      const impression = impressions.get(ymid);
+      // Keep videos recorded by older deployments valid during their original day.
+      if (!attempt.completionVersion) return Boolean(impression);
+      if (!completions.has(ymid)) return false;
+      if (attempt.completionVersion === 2) return Boolean(impression);
+      return creditableEvent(impression, attempt) ||
+        (attempt.format === "pop" && creditableEvent(clicks.get(ymid), attempt));
     },
     recordCompletion(userId, ymid) {
       return serialized(async () => {
@@ -218,6 +238,8 @@ async function createLedger(dataDir, now = () => Date.now()) {
       return serialized(async () => {
         const attempt = attempts.get(ymid);
         if (!attempt || (userId && userId !== attempt.userId)) return "ignored";
+        if (attempt.completionVersion >= 3 &&
+            source !== (attempt.format === "pop" ? "11977205_daily_popup" : "daily_video")) return "ignored";
         const collection = event === "click" ? clicks : impressions;
         if (collection.has(ymid)) return "duplicate";
         const row = {
@@ -269,10 +291,9 @@ async function createLedger(dataDir, now = () => Date.now()) {
           ads.set(row.ymid, ad);
         }
       }
-      for (const row of impressions.values()) {
-        const attempt = attempts.get(row.ymid);
-        if (!attempt || (attempt.completionVersion === 2 && !completions.has(row.ymid))) continue;
-        const user = users.get(row.userId);
+      for (const attempt of attempts.values()) {
+        if (!this.isCredited(attempt.ymid)) continue;
+        const user = users.get(attempt.userId);
         if (!user) continue;
         user.completedVideos++;
         totals.completedVideos++;

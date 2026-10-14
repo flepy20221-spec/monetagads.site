@@ -205,7 +205,7 @@ function makeMessage(update, webAppUrl, ledger) {
     const counts = ledger.counts(userId);
     return {
       chat_id: message.chat.id,
-      text: `Mini App (horário de Brasília):\nVídeos concluídos hoje: ${counts.completedVideos}/15\nImpressões confirmadas: ${counts.todayTotal}\n\nAo completar 15 vídeos confirmados, você pode solicitar R$ 0,05 hoje. É um pagamento por dia, sem acumular. Se os dados de pagamento estiverem errados, o administrador pode devolver para corrigir ainda hoje. O pedido aparece no painel para análise.`
+      text: `Mini App (horário de Brasília):\nAnúncios remunerados elegíveis hoje: ${counts.completedVideos}/15\nImpressões confirmadas: ${counts.todayTotal}\n\nAo completar 15 anúncios elegíveis, você pode solicitar R$ 0,05 hoje. É um pagamento por dia, sem acumular. Se os dados de pagamento estiverem errados, o administrador pode devolver para corrigir ainda hoje. O pedido aparece no painel para análise.`
     };
   }
   if (command === "privacidade") {
@@ -214,13 +214,13 @@ function makeMessage(update, webAppUrl, ledger) {
   if (command === "ajuda") {
     return {
       chat_id: message.chat.id,
-      text: "Mini Apps disponíveis\n\nYoung Money: assista 15 vídeos confirmados no dia para solicitar R$ 0,05 por PIX ou FaucetPay. O saque é separado dos pontos do aplicativo, limitado a um pedido por dia e não acumula. Se o pedido for devolvido por dados incorretos, você pode corrigir no mesmo dia. Use /status para consultar seu progresso.",
+      text: "Mini Apps disponíveis\n\nYoung Money: complete 15 anúncios remunerados elegíveis no dia para solicitar R$ 0,05 por PIX ou FaucetPay. O saque é separado dos pontos do aplicativo, limitado a um pedido por dia e não acumula. Se o pedido for devolvido por dados incorretos, você pode corrigir no mesmo dia. Use /status para consultar seu progresso.",
       reply_markup: miniAppsMenu(webAppUrl)
     };
   }
   return {
     chat_id: message.chat.id,
-    text: `Olá, ${displayName(message.from)}!\n\nMini Apps disponíveis\nYoung Money: acompanhe seus vídeos e sua recompensa diária. O saque da Mini App é separado dos pontos do aplicativo.`,
+    text: `Olá, ${displayName(message.from)}!\n\nMini Apps disponíveis\nYoung Money: acompanhe seus anúncios elegíveis e sua recompensa diária. O saque da Mini App é separado dos pontos do aplicativo.`,
     reply_markup: miniAppsMenu(webAppUrl)
   };
 }
@@ -485,7 +485,12 @@ async function createServer({ botToken, webhookSecret, postbackSecret, adminSecr
       if (!user) { reply(res, 401, { ok: false }); return; }
       try {
         if (req.method === "POST" && requestUrl.pathname === "/api/ad-attempts") {
-          const ymid = await ledger.createAttempt(user.id, user.profile);
+          const body = req.headers["content-type"]?.startsWith("application/json") ? await readJson(req) : null;
+          if (body && (typeof body !== "object" || Array.isArray(body) ||
+              Object.keys(body).length !== 1 || !["end", "pop"].includes(body.format))) {
+            reply(res, 400, { ok: false }); return;
+          }
+          const ymid = await ledger.createAttempt(user.id, user.profile, body?.format || "end");
           reply(res, 201, { ymid });
           return;
         }
@@ -537,14 +542,22 @@ async function createServer({ botToken, webhookSecret, postbackSecret, adminSecr
       const sub = q.get("sub") || "";
       const priceText = q.get("price") || "";
       if (["key", "ymid", "event", "value", "zone", "telegram_id", "source", "sub", "price"].some(k => q.getAll(k).length > 1) ||
-          !/^[a-f0-9-]{36}$/i.test(ymid || "") || zone !== "11977205" ||
+          (ymid && !/^[a-f0-9-]{36}$/i.test(ymid)) || zone !== "11977205" ||
           !["impression", "click"].includes(event) || !["valued", "non_valued"].includes(value) ||
           (userId && !/^\d{1,16}$/.test(userId)) ||
           (sub && !/^\d{1,16}$/.test(sub)) ||
-          (source && source !== "daily_video") ||
+          !["daily_video", "11977205_daily_popup", "auto"].includes(source) ||
           !/^\d+(?:\.\d+)?$/.test(priceText) || !Number.isFinite(Number(priceText))) {
         reply(res, 400, { ok: false }); return;
       }
+      // In-App has no unique show ID or completion callback. Acknowledge its
+      // postback without adding it to the rewarded ledger or payout threshold.
+      if (source === "auto") {
+        reply(res, event === "impression" ? 200 : 400,
+          { ok: event === "impression", result: "automatic_unrewarded" });
+        return;
+      }
+      if (!ymid) { reply(res, 400, { ok: false }); return; }
       try {
         const result = await ledger.recordAdEvent({
           ymid, userId, event, valued: value === "valued", price: Number(priceText), zone, sub, source

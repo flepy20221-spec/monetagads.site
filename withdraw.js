@@ -76,7 +76,7 @@
     methodIcon.setAttribute("href", selected === "pix" ? "#icon-pix" : "#icon-mail");
     pixFields.hidden = selected !== "pix";
     faucetFields.hidden = selected !== "faucetpay";
-    rules.textContent = "Um pagamento de R$ 0,05 por dia após 15 vídeos. Se os dados forem devolvidos, você pode corrigir e pedir novamente hoje. Não acumula. FaucetPay recebe USDT convertido na cotação do pedido.";
+    rules.textContent = "Um pagamento de R$ 0,05 por dia após 15 anúncios remunerados elegíveis (vídeos ou ofertas). Anúncios automáticos não contam. Se os dados forem devolvidos, você pode corrigir e pedir novamente hoje. Não acumula. FaucetPay recebe USDT convertido na cotação do pedido.";
     amount.value = money.format(0.05);
     const destinationValid = selected === "pix"
       ? pixType.value === "CPF" && validCpf(pixKey.value)
@@ -185,15 +185,15 @@
     form.hidden = !data.eligible || data.methods.length === 0;
     for (const option of method.options) option.disabled = !data.methods.includes(option.value);
     if (data.methods.length && method.selectedOptions[0]?.disabled) method.value = data.methods[0];
-    if (data.requested_today) setMessage("O saque de hoje já foi solicitado. Volte amanhã após completar a nova meta de 15 vídeos.");
+    if (data.requested_today) setMessage("O saque de hoje já foi solicitado. Volte amanhã após completar a nova meta de 15 anúncios.");
     else if (data.returned_today) setMessage(`Seu pedido foi devolvido${data.return_reason ? `: ${data.return_reason}` : "."} Corrija os dados e solicite novamente hoje. O direito de saque não passa para amanhã.`);
-    else if (!data.eligible) setMessage(`Vídeos de hoje: ${data.current}/${data.goal}. Complete 15 para solicitar R$ 0,05 hoje; não acumula para amanhã.`);
-    else setMessage("Meta de 15 vídeos concluída. Escolha PIX ou FaucetPay para solicitar R$ 0,05 hoje.");
+    else if (!data.eligible) setMessage(`Anúncios elegíveis hoje: ${data.current}/${data.goal}. Complete 15 para solicitar R$ 0,05 hoje; não acumula para amanhã.`);
+    else setMessage("Meta de 15 anúncios concluída. Escolha PIX ou FaucetPay para solicitar R$ 0,05 hoje.");
     validate();
   }
 
   async function loadStatus() {
-    setMessage("Consultando os vídeos de hoje...");
+    setMessage("Consultando os anúncios de hoje...");
     try { render(await callApi({ action: "status" })); }
     catch (error) { status = null; form.hidden = true; setMessage(error.message, "error"); }
   }

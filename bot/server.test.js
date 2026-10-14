@@ -287,6 +287,7 @@ test("video total counts one signed SDK completion only after a Monetag impressi
     report = await (await fetch(adminUrl, { headers: adminHeaders })).json();
     assert.equal(report.selected.completedVideos, 0);
     postback.searchParams.set("event", "impression");
+    postback.searchParams.set("price", "0.002");
     assert.equal((await (await fetch(postback)).json()).result, "recorded");
     report = await (await fetch(adminUrl, { headers: adminHeaders })).json();
     assert.equal(report.totals.completedVideos, 1);
@@ -297,6 +298,33 @@ test("video total counts one signed SDK completion only after a Monetag impressi
     const reloaded = await (await fetch(`http://127.0.0.1:${restarted.address().port}/admin/monetag?telegram_id=123`, { headers: adminHeaders })).json();
     assert.equal(reloaded.selected.completedVideos, 1);
     await new Promise(resolve => restarted.close(resolve));
+  });
+});
+
+test("paid popup counts once; automatic In-App impressions never unlock the reward", async () => {
+  await withServer(async base => {
+    const headers = { origin: "https://example.com", "x-telegram-init-data": initData(123),
+      "content-type": "application/json" };
+    assert.equal((await fetch(`${base}/api/ad-attempts`, { method: "POST", headers,
+      body: JSON.stringify({ format: "auto" }) })).status, 400);
+    const attempt = await fetch(`${base}/api/ad-attempts`, { method: "POST", headers,
+      body: JSON.stringify({ format: "pop" }) });
+    assert.equal(attempt.status, 201);
+    const { ymid } = await attempt.json();
+    const url = new URL(`${base}/monetag/postback`);
+    Object.entries({ key: config.postbackSecret, ymid, event: "click", value: "valued",
+      zone: "11977205", telegram_id: "123", source: "daily_video", price: "0.002" })
+      .forEach(([key, value]) => url.searchParams.set(key, value));
+    assert.equal((await (await fetch(url)).json()).result, "ignored");
+    url.searchParams.set("source", "11977205_daily_popup");
+    assert.equal((await (await fetch(url)).json()).result, "recorded");
+    await fetch(`${base}/api/ad-completions`, { method: "POST", headers, body: JSON.stringify({ ymid }) });
+    assert.equal((await (await fetch(`${base}/api/impressions`, { headers })).json()).completedVideos, 1);
+    url.searchParams.set("ymid", "");
+    url.searchParams.set("source", "auto");
+    url.searchParams.set("event", "impression");
+    assert.equal((await (await fetch(url)).json()).result, "automatic_unrewarded");
+    assert.equal((await (await fetch(`${base}/api/impressions`, { headers })).json()).completedVideos, 1);
   });
 });
 
@@ -336,7 +364,7 @@ test("Telegram link card shows completed videos only after SDK completion and im
     const headers = { origin: "https://example.com", "x-telegram-init-data": initData(123) };
     const { ymid } = await (await fetch(`${base}/api/ad-attempts`, { method: "POST", headers })).json();
     const postback = new URL(`${base}/monetag/postback`);
-    Object.entries({ key: config.postbackSecret, ymid, event: "impression", value: "valued", zone: "11977205", telegram_id: "123", source: "daily_video", price: "0.001" })
+    Object.entries({ key: config.postbackSecret, ymid, event: "impression", value: "valued", zone: "11977205", telegram_id: "123", source: "daily_video", price: "0.002" })
       .forEach(([key, value]) => postback.searchParams.set(key, value));
     await fetch(postback);
     progress = await (await fetch(statusUrl, { headers: auth })).json();

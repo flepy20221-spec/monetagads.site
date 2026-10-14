@@ -22,6 +22,9 @@
   let syncing = false;
   let cooldownUntil = 0;
   let cooldownTimer;
+  let readyAttempt = null;
+  let preparingAttempt = null;
+  let inAppStarted = false;
   try {
     const saved = Number(localStorage.getItem(COOLDOWN_KEY));
     if (Number.isFinite(saved)) cooldownUntil = Math.min(saved, Date.now() + COOLDOWN_MS);
@@ -54,9 +57,12 @@
         resetTimer = setTimeout(() => { void refreshProgress().catch(showProgressError); },
           Math.max(100, Date.parse(data.resetAt) - Date.parse(data.serverNow) + 100));
         render();
+        void ensureAttempt();
+        startInApp();
       } finally { clearTimeout(timeout); }
     })().catch(error => {
       progress = null;
+      readyAttempt = null;
       window.dispatchEvent(new CustomEvent("ym:progress", { detail: null }));
       clearTimeout(resetTimer);
       render();
@@ -125,6 +131,7 @@
         if (!secondsRemaining()) {
           clearInterval(cooldownTimer);
           cooldownTimer = null;
+          void ensureAttempt();
         }
       }, 250);
     }
@@ -141,10 +148,11 @@
 
   function render() {
     const count = Math.min(DAILY_LIMIT, progress?.completedVideos || 0);
+    const format = nextFormat(count);
     countVisible.textContent = String(count);
     countA11y.textContent = String(count);
     accountStatus.textContent = !progress ? "Conectando ao servidor..." :
-      "Telegram conectado • saque diário de R$ 0,05 após 15 vídeos • meta reinicia às 00:00 (Brasília)";
+      "Telegram conectado • R$ 0,05 após 15 anúncios remunerados elegíveis • reinicia às 00:00 (Brasília)";
     slots.replaceChildren();
 
     for (let i = 0; i < count; i++) {
@@ -159,8 +167,8 @@
     if (inFlight || !progress) {
       button.disabled = true;
       button.dataset.state = "loading";
-      buttonLabel.textContent = inFlight ? "Carregando..." : "Conectando...";
-      button.setAttribute("aria-label", inFlight ? "Carregando vídeo" : "Aguardando o servidor");
+      buttonLabel.textContent = inFlight ? "Confirmando..." : progress ? "Preparando..." : "Conectando...";
+      button.setAttribute("aria-label", inFlight ? "Confirmando anúncio" : "Preparando anúncio");
     } else if (count >= DAILY_LIMIT) {
       button.disabled = true;
       button.dataset.state = "limit";
@@ -172,10 +180,16 @@
       button.dataset.state = "cooldown";
       buttonLabel.textContent = `Aguarde ${seconds}s`;
       button.setAttribute("aria-label", `Próximo anúncio disponível em ${seconds} segundos.`);
+    } else if (!readyAttempt || readyAttempt.count !== count) {
+      button.disabled = true;
+      button.dataset.state = "loading";
+      buttonLabel.textContent = "Preparando...";
+      button.setAttribute("aria-label", "Preparando anúncio");
     } else {
       button.disabled = false;
-      button.dataset.state = "ready";
-      button.setAttribute("aria-label", `Assistir vídeo. ${count} de ${DAILY_LIMIT} vídeos concluídos e confirmados hoje.`);
+      button.dataset.state = format === "pop" ? "pop" : "ready";
+      buttonLabel.textContent = format === "pop" ? "Abrir oferta" : "Assistir vídeo";
+      button.setAttribute("aria-label", `${format === "pop" ? "Abrir oferta em nova aba" : "Assistir vídeo"}. ${count} de ${DAILY_LIMIT} anúncios remunerados elegíveis hoje.`);
     }
   }
 
@@ -187,12 +201,29 @@
     noticeTimer = setTimeout(() => notice.classList.remove("is-visible"), 4200);
   }
 
-  async function prepareAd() {
+  function nextFormat(count) {
+    // Five optional offer steps are spread across the 15 rewarded actions.
+    return (count + 1) % 3 === 0 ? "pop" : "end";
+  }
+
+  function startInApp() {
+    if (inAppStarted || typeof window.show_11977205 !== "function" || !window.Telegram?.WebApp?.initData) return;
+    inAppStarted = true;
+    try {
+      void Promise.resolve(window.show_11977205({
+        type: "inApp",
+        inAppSettings: { frequency: 2, capping: 0.1, interval: 30, timeout: 5, everyPage: false }
+      })).catch(() => { /* Automatic impressions do not affect rewards. */ });
+    } catch { /* Keep rewarded actions available if automatic ads fail. */ }
+  }
+
+  async function prepareAd(format) {
     const initData = window.Telegram?.WebApp?.initData;
     if (!initData) throw new Error("Open the Mini App from Telegram");
     const response = await fetch(`${API_BASE}/api/ad-attempts`, {
       method: "POST",
-      headers: { "x-telegram-init-data": initData },
+      headers: { "x-telegram-init-data": initData, "content-type": "application/json" },
+      body: JSON.stringify({ format }),
       cache: "no-store"
     });
     if (response.status === 429) {
@@ -202,7 +233,7 @@
     }
     if (response.status === 409) {
       await refreshProgress();
-      showNotice("Meta de vídeos concluída. Volte após meia-noite.");
+      showNotice("Meta de anúncios concluída. Volte após meia-noite.");
       return null;
     }
     if (!response.ok) throw new Error("Could not prepare ad");
@@ -211,37 +242,61 @@
     return ymid;
   }
 
-  button.addEventListener("click", async () => {
-    if (inFlight || !progress || secondsRemaining()) return;
+  function ensureAttempt() {
+    if (inFlight || !progress || secondsRemaining() || progress.completedVideos >= DAILY_LIMIT) return Promise.resolve(null);
+    const count = progress.completedVideos;
+    const format = nextFormat(count);
+    if (readyAttempt?.count === count && readyAttempt.format === format) return Promise.resolve(readyAttempt);
+    if (preparingAttempt) return preparingAttempt;
+    readyAttempt = null;
+    preparingAttempt = prepareAd(format).then(ymid => {
+      if (ymid && progress?.completedVideos === count) readyAttempt = { ymid, format, count };
+      return readyAttempt;
+    }).catch(() => null).finally(() => { preparingAttempt = null; render(); });
+    render();
+    return preparingAttempt;
+  }
+
+  button.addEventListener("click", () => {
+    if (inFlight || !progress || secondsRemaining() || !readyAttempt) return;
     if (progress.completedVideos >= DAILY_LIMIT) { render(); return; }
 
     const showAd = window.show_11977205;
     if (typeof showAd !== "function") {
-      showNotice("Vídeo indisponível no momento. Tente novamente.", "error");
+      showNotice("Anúncio indisponível no momento. Tente novamente.", "error");
       return;
     }
 
+    const { ymid, format } = readyAttempt;
+    if (format !== nextFormat(progress.completedVideos)) { readyAttempt = null; void ensureAttempt(); return; }
+    readyAttempt = null;
     inFlight = true;
     render();
-    let adStarted = false;
+    startCooldown(10);
+    // The Popup must be invoked synchronously inside the click handler.
+    // An awaited network request here would make the SDK reject the popup.
+    let shown;
     try {
-      const ymid = await prepareAd();
-      if (!ymid) return;
-      adStarted = true;
-      startCooldown(10);
-      await showAd({ type: "end", ymid, requestVar: "daily_video", catchIfNoFeed: true }); // Zone 11977205.
+      shown = showAd({ type: format, ymid,
+        requestVar: format === "pop" ? "daily_popup" : "daily_video", catchIfNoFeed: true });
+    } catch { shown = Promise.reject(new Error("Ad unavailable")); }
+    void Promise.resolve(shown).then(async result => {
+      // The callback can be non_valued before a later paid Popup click. Only
+      // the authenticated Monetag postback decides whether to advance the goal.
       queueCompletion(ymid);
       await syncPending();
       await refreshProgress().catch(showProgressError);
-      showNotice("Vídeo concluído. A contagem aparece após a confirmação da impressão.");
-    } catch {
-      showNotice(adStarted ? "O vídeo não foi concluído. Tente novamente." : "Abra pelo bot no Telegram e tente novamente.", "error");
-    } finally {
-      if (adStarted) startCooldown(10);
+      showNotice(result?.reward_event_type === "valued"
+        ? "Anúncio confirmado. A meta atualiza após o postback remunerado."
+        : "Aguardando confirmação remunerada da Monetag.");
+    }).catch(() => {
+      showNotice("O anúncio não foi confirmado. Tente novamente.", "error");
+    }).finally(() => {
       inFlight = false;
       render();
       setTimeout(() => { void refreshProgress().catch(showProgressError); }, 5000);
-    }
+      void ensureAttempt();
+    });
   });
 
   document.addEventListener("visibilitychange", () => {

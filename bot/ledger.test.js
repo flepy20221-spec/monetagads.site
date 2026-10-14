@@ -37,7 +37,7 @@ test("Mini App progress resets at midnight in Sao Paulo, counting only confirmed
     const ymid = await ledger.createAttempt("123");
     await ledger.recordCompletion("123", ymid);
     assert.deepEqual(ledger.dailyVideoProgress("123"), { day: "2026-10-07", completed: 0, goal: 15 });
-    await ledger.recordAdEvent({ ymid, userId: "123", event: "impression", valued: true, price: 0.001, zone: "11977205", source: "daily_video" });
+    await ledger.recordAdEvent({ ymid, userId: "123", event: "impression", valued: true, price: 0.002, zone: "11977205", source: "daily_video" });
     assert.equal(ledger.dailyVideoProgress("123").completed, 1);
     time += 60000;
     assert.deepEqual(ledger.dailyVideoProgress("123"), { day: "2026-10-08", completed: 0, goal: 15 });
@@ -132,7 +132,7 @@ test("15 completed videos meet today's goal; cap resets at Sao Paulo midnight", 
     for (let index = 0; index < 15; index++) {
       const ymid = await ledger.createAttempt("123");
       await ledger.recordAdEvent({ ymid, userId: "123", event: "impression",
-        valued: false, price: 0, zone: "11977205", source: "daily_video" });
+        valued: true, price: 0.002, zone: "11977205", source: "daily_video" });
       await ledger.recordCompletion("123", ymid);
       assert.equal(await ledger.recordCompletion("123", ymid), "duplicate");
       time += 10000;
@@ -145,6 +145,49 @@ test("15 completed videos meet today's goal; cap resets at Sao Paulo midnight", 
     assert.equal(ledger.counts("123").todayTotal, 0);
     assert.equal(ledger.counts("123").completedVideos, 0);
     assert.equal(typeof await ledger.createAttempt("123"), "string");
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("15 rewarded videos and popups require paid postbacks of at least US$0.002 each", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "young-money-revenue-floor-"));
+  let time = Date.parse("2026-10-12T15:00:00.000Z");
+  try {
+    let ledger = await createLedger(dir, () => time);
+    const cheap = await ledger.createAttempt("123");
+    await ledger.recordCompletion("123", cheap);
+    await ledger.recordAdEvent({ ymid: cheap, userId: "123", event: "impression",
+      valued: true, price: 0.0019, source: "daily_video" });
+    assert.equal(ledger.counts("123").completedVideos, 0);
+    time += 10000;
+    const unpaid = await ledger.createAttempt("123");
+    await ledger.recordCompletion("123", unpaid);
+    await ledger.recordAdEvent({ ymid: unpaid, userId: "123", event: "impression",
+      valued: false, price: 0, source: "daily_video" });
+    assert.equal(ledger.counts("123").completedVideos, 0);
+    time += 10000;
+    for (let index = 0; index < 15; index++) {
+      const format = (index + 1) % 3 === 0 ? "pop" : "end";
+      const ymid = await ledger.createAttempt("123", null, format);
+      const source = format === "pop" ? "11977205_daily_popup" : "daily_video";
+      await ledger.recordCompletion("123", ymid);
+      assert.equal(await ledger.recordAdEvent({ ymid, userId: "123", event: "impression",
+        valued: true, price: 0.002, source: "wrong_source" }), "ignored");
+      if (format === "pop") {
+        await ledger.recordAdEvent({ ymid, userId: "123", event: "click",
+          valued: true, price: 0.002, source });
+      } else {
+        await ledger.recordAdEvent({ ymid, userId: "123", event: "impression",
+          valued: true, price: 0.002, source });
+      }
+      assert.equal(ledger.counts("123").completedVideos, index + 1);
+      time += 10000;
+    }
+    assert.equal(ledger.report("123").totals.completedVideos, 15);
+    await assert.rejects(ledger.createAttempt("123"), error => error.status === 409);
+    ledger = await createLedger(dir, () => time);
+    assert.equal(ledger.counts("123").completedVideos, 15);
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }

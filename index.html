@@ -4,14 +4,14 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#030826" />
-    <meta name="description" content="Young Money: assista a vídeos e acompanhe seu limite diário." />
-    <title>Young Money | Vídeos diários</title>
+    <meta name="description" content="Young Money: complete anúncios remunerados e acompanhe sua meta diária." />
+    <title>Young Money | Anúncios diários</title>
     <link rel="preload" href="./assets/young-money-space.webp?v=470b58c" as="image" />
-    <link rel="stylesheet" href="./styles.css?v=cosmic-ui-v4" />
+    <link rel="stylesheet" href="./styles.css?v=rewarded-v5" />
     <script src="https://telegram.org/js/telegram-web-app.js" defer></script>
     <script src="https://libtl.com/sdk.js" data-zone="11977205" data-sdk="show_11977205" defer></script>
-    <script src="./app.js?v=cosmic-ui-v2" defer></script>
-    <script src="./withdraw.js?v=cosmic-ui-v4" defer></script>
+    <script src="./app.js?v=rewarded-v5" defer></script>
+    <script src="./withdraw.js?v=rewarded-v5" defer></script>
   </head>
   <body>
     <svg class="icon-defs" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg">
@@ -34,7 +34,7 @@
     </svg>
     <main class="scene" aria-labelledby="page-title">
       <h1 id="page-title" class="sr-only">Young Money</h1>
-      <p class="sr-only">Vídeos, recompensas, todos os dias. Você pode assistir até 15 vídeos por dia.</p>
+      <p class="sr-only">Vídeos e ofertas, recompensas todos os dias. Complete 15 anúncios remunerados elegíveis.</p>
 
       <img
         class="scene-art"
@@ -45,8 +45,8 @@
         height="1600"
       />
 
-      <section class="daily-progress" aria-label="Limite diário de vídeos">
-        <p class="sr-only">Vídeos confirmados hoje: <span id="count-a11y">0</span> de 15. Reinicia à meia-noite de Brasília.</p>
+      <section class="daily-progress" aria-label="Meta diária de anúncios">
+        <p class="sr-only">Anúncios remunerados elegíveis hoje: <span id="count-a11y">0</span> de 15. Reinicia à meia-noite de Brasília.</p>
         <div class="count-cover" aria-hidden="true">
           <span id="count-visible" class="count-current">0</span>
           <span class="count-divider">/</span>
@@ -71,13 +71,13 @@
       <section id="withdraw-screen" class="withdraw-screen" aria-labelledby="withdraw-title" hidden>
         <div class="withdraw-layout">
           <header class="withdraw-heading">
-            <button id="withdraw-back" type="button" class="withdraw-back" aria-label="Voltar aos vídeos"><svg aria-hidden="true"><use href="#icon-arrow" /></svg></button>
+            <button id="withdraw-back" type="button" class="withdraw-back" aria-label="Voltar aos anúncios"><svg aria-hidden="true"><use href="#icon-arrow" /></svg></button>
             <div class="withdraw-brand" aria-label="Young Money Mini App"><small>MINI APP</small></div>
           </header>
           <img class="withdraw-wallet-art" src="./assets/mini-withdraw-wallet.webp" alt="" width="1312" height="1199" draggable="false" />
           <div class="withdraw-intro">
             <h2 id="withdraw-title">Solicitar saque</h2>
-            <p id="withdraw-message" class="withdraw-status" role="status">Consultando os vídeos de hoje...</p>
+            <p id="withdraw-message" class="withdraw-status" role="status">Consultando os anúncios de hoje...</p>
           </div>
           <button id="withdraw-history-open" class="withdraw-history-open" type="button"><svg aria-hidden="true"><use href="#icon-clock" /></svg><span>Histórico de saques</span><svg aria-hidden="true"><use href="#icon-chevron" /></svg></button>
           <form id="withdraw-form" class="withdraw-form" hidden>

@@ -150,7 +150,8 @@ body {
 
 .watch-button[data-state="loading"] .button-state,
 .watch-button[data-state="limit"] .button-state,
-.watch-button[data-state="cooldown"] .button-state { display: flex; }
+.watch-button[data-state="cooldown"] .button-state,
+.watch-button[data-state="pop"] .button-state { display: flex; }
 
 .button-spinner {
   width: .8em;
@@ -162,7 +163,8 @@ body {
 }
 
 .watch-button[data-state="limit"] .button-spinner,
-.watch-button[data-state="cooldown"] .button-spinner { display: none; }
+.watch-button[data-state="cooldown"] .button-spinner,
+.watch-button[data-state="pop"] .button-spinner { display: none; }
 .button-icon { display: none; width: 1.15em; height: 1.15em; }
 .watch-button[data-state="limit"] .button-icon { display: block; }
 
