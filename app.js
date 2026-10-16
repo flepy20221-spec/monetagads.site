@@ -24,7 +24,7 @@
   let syncing = false;
   let cooldownUntil = 0;
   let cooldownTimer;
-  let readyAttempt = null;
+  let readyAttempts = null;
   let preparingAttempt = null;
   let inAppStarted = false;
   try {
@@ -64,7 +64,7 @@
       } finally { clearTimeout(timeout); }
     })().catch(error => {
       progress = null;
-      readyAttempt = null;
+      readyAttempts = null;
       window.dispatchEvent(new CustomEvent("ym:progress", { detail: null }));
       clearTimeout(resetTimer);
       render();
@@ -150,8 +150,7 @@
 
   function render() {
     const count = Math.min(DAILY_LIMIT, progress?.completedVideos || 0);
-    const format = nextFormat(count);
-    const ready = readyAttempt?.count === count && readyAttempt.format === format;
+    const ready = readyAttempts?.count === count;
     countVisible.textContent = String(count);
     countA11y.textContent = String(count);
     accountStatus.textContent = !progress ? "Conectando ao servidor..." :
@@ -190,30 +189,21 @@
       button.setAttribute("aria-label", `Próximo anúncio disponível em ${seconds} segundos.`);
       popupLabel.textContent = `Aguarde ${seconds}s`;
       popupButton.setAttribute("aria-label", `Próxima oferta disponível em ${seconds} segundos.`);
-    } else if (format === "pop") {
-      button.disabled = true;
-      button.dataset.state = "waiting";
-      buttonLabel.textContent = "Abra a oferta abaixo";
-      button.setAttribute("aria-label", "Nesta etapa, abra a oferta premiada abaixo.");
-      popupButton.disabled = !ready;
-      popupLabel.textContent = ready ? "Abrir oferta premiada" : "Preparando oferta...";
-      popupButton.setAttribute("aria-label", ready ? `Abrir oferta premiada. Etapa ${count + 1} de ${DAILY_LIMIT}.` : "Preparando oferta premiada");
     } else if (!ready) {
       button.disabled = true;
       button.dataset.state = "loading";
       buttonLabel.textContent = "Preparando...";
       button.setAttribute("aria-label", "Preparando anúncio");
-      const nextPopup = Math.ceil((count + 1) / 3) * 3;
-      popupLabel.textContent = `Oferta na etapa ${nextPopup}`;
-      popupButton.setAttribute("aria-label", `Oferta premiada disponível na etapa ${nextPopup} de ${DAILY_LIMIT}.`);
+      popupLabel.textContent = "Preparando oferta...";
+      popupButton.setAttribute("aria-label", "Preparando oferta premiada");
     } else {
       button.disabled = false;
       button.dataset.state = "ready";
       buttonLabel.textContent = "Assistir vídeo";
       button.setAttribute("aria-label", `Assistir vídeo. ${count} de ${DAILY_LIMIT} anúncios remunerados elegíveis hoje.`);
-      const nextPopup = Math.ceil((count + 1) / 3) * 3;
-      popupLabel.textContent = `Oferta na etapa ${nextPopup}`;
-      popupButton.setAttribute("aria-label", `Oferta premiada disponível na etapa ${nextPopup} de ${DAILY_LIMIT}.`);
+      popupButton.disabled = false;
+      popupLabel.textContent = "Abrir oferta premiada";
+      popupButton.setAttribute("aria-label", `Abrir oferta premiada. ${count} de ${DAILY_LIMIT} anúncios elegíveis hoje.`);
     }
   }
 
@@ -223,11 +213,6 @@
     notice.dataset.kind = kind;
     notice.classList.add("is-visible");
     noticeTimer = setTimeout(() => notice.classList.remove("is-visible"), 4200);
-  }
-
-  function nextFormat(count) {
-    // Five optional offer steps are spread across the 15 rewarded actions.
-    return (count + 1) % 3 === 0 ? "pop" : "end";
   }
 
   function startInApp() {
@@ -241,13 +226,13 @@
     } catch { /* Keep rewarded actions available if automatic ads fail. */ }
   }
 
-  async function prepareAd(format) {
+  async function prepareAds() {
     const initData = window.Telegram?.WebApp?.initData;
     if (!initData) throw new Error("Open the Mini App from Telegram");
     const response = await fetch(`${API_BASE}/api/ad-attempts`, {
       method: "POST",
       headers: { "x-telegram-init-data": initData, "content-type": "application/json" },
-      body: JSON.stringify({ format }),
+      body: JSON.stringify({ format: "both" }),
       cache: "no-store"
     });
     if (response.status === 429) {
@@ -261,28 +246,28 @@
       return null;
     }
     if (!response.ok) throw new Error("Could not prepare ad");
-    const { ymid } = await response.json();
-    if (!/^[a-f0-9-]{36}$/i.test(ymid)) throw new Error("Invalid ad identifier");
-    return ymid;
+    const { ymids } = await response.json();
+    if (![ymids?.end, ymids?.pop].every(id => /^[a-f0-9-]{36}$/i.test(id)) ||
+        ymids.end === ymids.pop) throw new Error("Invalid ad identifiers");
+    return ymids;
   }
 
   function ensureAttempt() {
     if (inFlight || !progress || secondsRemaining() || progress.completedVideos >= DAILY_LIMIT) return Promise.resolve(null);
     const count = progress.completedVideos;
-    const format = nextFormat(count);
-    if (readyAttempt?.count === count && readyAttempt.format === format) return Promise.resolve(readyAttempt);
+    if (readyAttempts?.count === count) return Promise.resolve(readyAttempts);
     if (preparingAttempt) return preparingAttempt;
-    readyAttempt = null;
-    preparingAttempt = prepareAd(format).then(ymid => {
-      if (ymid && progress?.completedVideos === count) readyAttempt = { ymid, format, count };
-      return readyAttempt;
+    readyAttempts = null;
+    preparingAttempt = prepareAds().then(ymids => {
+      if (ymids && progress?.completedVideos === count) readyAttempts = { ymids, count };
+      return readyAttempts;
     }).catch(() => null).finally(() => { preparingAttempt = null; render(); });
     render();
     return preparingAttempt;
   }
 
   function openAd(requestedFormat) {
-    if (inFlight || !progress || secondsRemaining() || !readyAttempt) return;
+    if (inFlight || !progress || secondsRemaining() || readyAttempts?.count !== progress.completedVideos) return;
     if (progress.completedVideos >= DAILY_LIMIT) { render(); return; }
 
     const showAd = window.show_11977205;
@@ -291,10 +276,10 @@
       return;
     }
 
-    const { ymid, format } = readyAttempt;
-    if (format !== requestedFormat) return;
-    if (format !== nextFormat(progress.completedVideos)) { readyAttempt = null; void ensureAttempt(); return; }
-    readyAttempt = null;
+    const ymid = readyAttempts.ymids[requestedFormat];
+    if (!ymid) return;
+    const format = requestedFormat;
+    readyAttempts = null;
     inFlight = true;
     render();
     startCooldown(10);

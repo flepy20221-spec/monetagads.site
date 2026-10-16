@@ -192,3 +192,31 @@ test("15 rewarded videos and popups require paid postbacks of at least US$0.002 
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
+
+test("one preparation provides both clickable formats and identifies why a postback is uncredited", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "young-money-ad-choices-"));
+  const time = Date.parse("2026-10-16T01:00:00.000Z");
+  try {
+    const ledger = await createLedger(dir, () => time);
+    const choices = await ledger.prepareChoices("123");
+    assert.notEqual(choices.end, choices.pop);
+    await assert.rejects(ledger.prepareChoices("123"), error => error.status === 429);
+    assert.equal(await ledger.recordAdEvent({ ymid: choices.pop, userId: "123", event: "impression",
+      valued: true, price: 0.0019, source: "11977205_daily_popup" }), "recorded");
+    await ledger.recordCompletion("123", choices.pop);
+    assert.equal(ledger.counts("123").completedVideos, 0);
+    assert.deepEqual(ledger.diagnostics(), { attempts: 2, credited: 0, noPostback: 1,
+      withoutClientCompletion: 0, nonValued: 0, belowFloor: 1, end: 1, pop: 1 });
+    await ledger.recordAdEvent({ ymid: choices.pop, userId: "123", event: "click",
+      valued: true, price: 0.003, source: "11977205_daily_popup" });
+    assert.equal(ledger.counts("123").completedVideos, 1);
+    assert.equal(await ledger.recordAdEvent({ ymid: choices.end, userId: "123", event: "impression",
+      valued: false, price: 0, source: "daily_video" }), "recorded");
+    assert.equal(await ledger.recordAdEvent({ ymid: choices.end, userId: "123", event: "impression",
+      valued: true, price: 0.002, source: "daily_video" }), "updated");
+    assert.equal(ledger.counts("123").completedVideos, 2,
+      "a paid postback credits without relying on a callback from the client");
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});

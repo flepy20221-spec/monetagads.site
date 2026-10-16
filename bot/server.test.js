@@ -256,7 +256,7 @@ test("admin photo endpoint serves a small Telegram thumbnail without exposing th
   }, { getTelegramPhoto: async id => { photoLookups++; assert.equal(id, "123"); return photo; } });
 });
 
-test("video total counts one signed SDK completion only after a Monetag impression and survives restart", async () => {
+test("video total counts a paid Monetag impression once and survives restart", async () => {
   await withServer(async (base, _sent, dataDir) => {
     const headers = { origin: "https://example.com", "x-telegram-init-data": initData(123, { first_name: "Ana" }) };
     const preflight = await fetch(`${base}/api/ad-completions`, {
@@ -330,7 +330,31 @@ test("paid popup counts once; automatic In-App impressions never unlock the rewa
   });
 });
 
-test("Telegram link card shows completed videos only after SDK completion and impression", async () => {
+test("signed preparation makes both buttons clickable without double counting", async () => {
+  await withServer(async base => {
+    const headers = { origin: "https://example.com", "x-telegram-init-data": initData(123),
+      "content-type": "application/json" };
+    const prepared = await fetch(`${base}/api/ad-attempts`, { method: "POST", headers,
+      body: JSON.stringify({ format: "both" }) });
+    assert.equal(prepared.status, 201);
+    const { ymids } = await prepared.json();
+    assert.match(ymids.end, /^[a-f0-9-]{36}$/i);
+    assert.match(ymids.pop, /^[a-f0-9-]{36}$/i);
+    assert.notEqual(ymids.end, ymids.pop);
+    const url = new URL(`${base}/monetag/postback`);
+    Object.entries({ key: config.postbackSecret, ymid: ymids.pop,
+      event: "impression", value: "valued", zone: "11977205",
+      telegram_id: "123", source: "11977205_daily_popup", price: "0.002" })
+      .forEach(([key, value]) => url.searchParams.set(key, value));
+    assert.equal((await (await fetch(url)).json()).result, "recorded");
+    assert.equal((await (await fetch(`${base}/api/impressions`, { headers })).json()).completedVideos, 1);
+    await fetch(`${base}/api/ad-completions`, { method: "POST", headers,
+      body: JSON.stringify({ ymid: ymids.pop }) });
+    assert.equal((await (await fetch(`${base}/api/impressions`, { headers })).json()).completedVideos, 1);
+  });
+});
+
+test("Telegram link card shows completed ads after a paid postback, even without SDK completion", async () => {
   const answers = [];
   await withServer(async (base, sent, dataDir) => {
     const created = await fetch(`${base}/api/app-links`, { method: "POST" });
@@ -371,10 +395,10 @@ test("Telegram link card shows completed videos only after SDK completion and im
     await fetch(postback);
     progress = await (await fetch(statusUrl, { headers: auth })).json();
     const miniAppProgress = await (await fetch(`${base}/api/impressions`, { headers })).json();
-    assert.equal(progress.completed, 0);
+    assert.equal(progress.completed, 1);
     assert.equal(progress.impressions, miniAppProgress.todayTotal);
     assert.equal(progress.day, miniAppProgress.today);
-    assert.equal(progress.completedVideos, 0);
+    assert.equal(progress.completedVideos, 1);
     await fetch(`${base}/api/ad-completions`, {
       method: "POST", headers: { ...headers, "content-type": "application/json" },
       body: JSON.stringify({ ymid })

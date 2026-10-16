@@ -264,6 +264,9 @@ async function createServer({ botToken, webhookSecret, postbackSecret, adminSecr
   if (url.protocol !== "https:") throw new Error("WEBAPP_URL must use HTTPS");
   const appUrl = url.toString();
   const ledger = await createLedger(dataDir);
+  if (process.env.NODE_ENV === "production") {
+    console.info("Monetag ledger 12h summary:", JSON.stringify(ledger.diagnostics()));
+  }
   const allowedOrigin = new URL(appUrl).origin;
   const profileLookupAt = new Map();
   const photoCache = new Map();
@@ -490,8 +493,13 @@ async function createServer({ botToken, webhookSecret, postbackSecret, adminSecr
         if (req.method === "POST" && requestUrl.pathname === "/api/ad-attempts") {
           const body = req.headers["content-type"]?.startsWith("application/json") ? await readJson(req) : null;
           if (body && (typeof body !== "object" || Array.isArray(body) ||
-              Object.keys(body).length !== 1 || !["end", "pop"].includes(body.format))) {
+              Object.keys(body).length !== 1 || !["end", "pop", "both"].includes(body.format))) {
             reply(res, 400, { ok: false }); return;
+          }
+          if (body?.format === "both") {
+            const ymids = await ledger.prepareChoices(user.id, user.profile);
+            reply(res, 201, { ymids });
+            return;
           }
           const ymid = await ledger.createAttempt(user.id, user.profile, body?.format || "end");
           reply(res, 201, { ymid });
@@ -565,6 +573,11 @@ async function createServer({ botToken, webhookSecret, postbackSecret, adminSecr
         const result = await ledger.recordAdEvent({
           ymid, userId, event, valued: value === "valued", price: Number(priceText), zone, sub, source
         });
+        if (process.env.NODE_ENV === "production") {
+          console.info("Monetag postback processed:", JSON.stringify({
+            result, event, source, valued: value === "valued", price: Number(priceText)
+          }));
+        }
         reply(res, 200, { ok: true, result });
       } catch (error) {
         console.error("Postback persistence failed:", error.message);

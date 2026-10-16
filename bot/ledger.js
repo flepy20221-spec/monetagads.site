@@ -97,33 +97,53 @@ async function createLedger(dataDir, now = () => Date.now()) {
       await handle.close();
     }
   }
+  function newAttempt(userId, profile, format, timestamp) {
+    return {
+      kind: "attempt", ymid: crypto.randomUUID(), userId, at: new Date(timestamp).toISOString(),
+      completionVersion: 3, format, minPriceUsd: MIN_CREDITABLE_PRICE_USD,
+      ...(profile?.name ? { name: profile.name, username: profile.username || null } : {})
+    };
+  }
+  function checkAttemptAvailable(ledger, userId, timestamp) {
+    if (ledger.dailyVideoProgress(userId).completed >= 15) {
+      const error = new Error("Daily ad limit reached");
+      error.status = 409;
+      throw error;
+    }
+    const last = lastAttemptByUser.get(userId);
+    const elapsed = last ? timestamp - Date.parse(last.at) : Infinity;
+    if (elapsed < 10000) {
+      const error = new Error("Ad cooldown active");
+      error.status = 429;
+      error.retryAfterSeconds = Math.ceil(Math.min(10000, 10000 - elapsed) / 1000);
+      throw error;
+    }
+  }
+  async function saveAttempt(row) {
+    await append(row);
+    attempts.set(row.ymid, row);
+    lastAttemptByUser.set(row.userId, row);
+    if (row.name) profiles.set(row.userId, { name: row.name, username: row.username, at: row.at });
+  }
   return {
     createAttempt(userId, profile = null, format = "end") {
       return serialized(async () => {
         const timestamp = now();
-        if (this.dailyVideoProgress(userId).completed >= 15) {
-          const error = new Error("Daily video limit reached");
-          error.status = 409;
-          throw error;
-        }
-        const last = lastAttemptByUser.get(userId);
-        const elapsed = last ? timestamp - Date.parse(last.at) : Infinity;
-        if (elapsed < 10000) {
-          const error = new Error("Ad cooldown active");
-          error.status = 429;
-          error.retryAfterSeconds = Math.ceil(Math.min(10000, 10000 - elapsed) / 1000);
-          throw error;
-        }
-        const row = {
-          kind: "attempt", ymid: crypto.randomUUID(), userId, at: new Date(timestamp).toISOString(),
-          completionVersion: 3, format, minPriceUsd: MIN_CREDITABLE_PRICE_USD,
-          ...(profile?.name ? { name: profile.name, username: profile.username || null } : {})
-        };
-        await append(row);
-        attempts.set(row.ymid, row);
-        lastAttemptByUser.set(userId, row);
-        if (row.name) profiles.set(userId, { name: row.name, username: row.username, at: row.at });
+        checkAttemptAvailable(this, userId, timestamp);
+        const row = newAttempt(userId, profile, format, timestamp);
+        await saveAttempt(row);
         return row.ymid;
+      });
+    },
+    prepareChoices(userId, profile = null) {
+      return serialized(async () => {
+        const timestamp = now();
+        checkAttemptAvailable(this, userId, timestamp);
+        const end = newAttempt(userId, profile, "end", timestamp);
+        const pop = newAttempt(userId, profile, "pop", timestamp);
+        await saveAttempt(end);
+        await saveAttempt(pop);
+        return { end: end.ymid, pop: pop.ymid };
       });
     },
     saveProfile(userId, profile) {
@@ -218,8 +238,9 @@ async function createLedger(dataDir, now = () => Date.now()) {
       const impression = impressions.get(ymid);
       // Keep videos recorded by older deployments valid during their original day.
       if (!attempt.completionVersion) return Boolean(impression);
-      if (!completions.has(ymid)) return false;
-      if (attempt.completionVersion === 2) return Boolean(impression);
+      if (attempt.completionVersion === 2) return completions.has(ymid) && Boolean(impression);
+      // The Monetag server postback is authoritative. A client completion can
+      // disappear when Telegram closes, even after the paid event reaches us.
       return creditableEvent(impression, attempt) ||
         (attempt.format === "pop" && creditableEvent(clicks.get(ymid), attempt));
     },
@@ -241,15 +262,35 @@ async function createLedger(dataDir, now = () => Date.now()) {
         if (attempt.completionVersion >= 3 &&
             source !== (attempt.format === "pop" ? "11977205_daily_popup" : "daily_video")) return "ignored";
         const collection = event === "click" ? clicks : impressions;
-        if (collection.has(ymid)) return "duplicate";
+        const previous = collection.get(ymid);
+        // A later paid correction for the same event may increase its value.
+        // Keep only the newest higher-valued row, so one ymid counts once.
+        if (previous && (!valued || previous.valued && previous.price >= price)) return "duplicate";
         const row = {
           kind: event, ymid, userId: attempt.userId, valued,
           price, zone, sub, source, at: new Date(now()).toISOString()
         };
         await append(row);
         collection.set(ymid, row);
-        return "recorded";
+        return previous ? "updated" : "recorded";
       });
+    },
+    diagnostics(hours = 12) {
+      const since = now() - hours * 3600000;
+      const result = { attempts: 0, credited: 0, noPostback: 0, withoutClientCompletion: 0,
+        nonValued: 0, belowFloor: 0, end: 0, pop: 0 };
+      for (const attempt of attempts.values()) {
+        if (Date.parse(attempt.at) < since) continue;
+        result.attempts++;
+        result[attempt.format === "pop" ? "pop" : "end"]++;
+        const events = [impressions.get(attempt.ymid), clicks.get(attempt.ymid)].filter(Boolean);
+        if (events.length && !completions.has(attempt.ymid)) result.withoutClientCompletion++;
+        if (this.isCredited(attempt.ymid)) { result.credited++; continue; }
+        if (!events.length) result.noPostback++;
+        else if (events.some(event => event.valued && event.price > 0)) result.belowFloor++;
+        else result.nonValued++;
+      }
+      return result;
     },
     report(telegramId = "", limit = 100) {
       const today = new Date(now()).toISOString().slice(0, 10);
