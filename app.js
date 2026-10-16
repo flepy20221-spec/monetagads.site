@@ -8,6 +8,8 @@
   const COOLDOWN_KEY = "young-money-ad-cooldown-v1";
   const button = document.getElementById("watch-button");
   const buttonLabel = document.getElementById("button-state-label");
+  const popupButton = document.getElementById("popup-button");
+  const popupLabel = document.getElementById("popup-button-label");
   const countVisible = document.getElementById("count-visible");
   const countA11y = document.getElementById("count-a11y");
   const slots = document.getElementById("completed-slots");
@@ -149,10 +151,11 @@
   function render() {
     const count = Math.min(DAILY_LIMIT, progress?.completedVideos || 0);
     const format = nextFormat(count);
+    const ready = readyAttempt?.count === count && readyAttempt.format === format;
     countVisible.textContent = String(count);
     countA11y.textContent = String(count);
     accountStatus.textContent = !progress ? "Conectando ao servidor..." :
-      "Telegram conectado • R$ 0,05 após 15 anúncios remunerados elegíveis • reinicia às 00:00 (Brasília)";
+      "Telegram conectado • 15 anúncios elegíveis para R$ 0,05 • reinicia 00:00 (Brasília)";
     slots.replaceChildren();
 
     for (let i = 0; i < count; i++) {
@@ -164,32 +167,53 @@
       slots.append(mark);
     }
 
+    popupButton.disabled = true;
     if (inFlight || !progress) {
       button.disabled = true;
       button.dataset.state = "loading";
       buttonLabel.textContent = inFlight ? "Confirmando..." : progress ? "Preparando..." : "Conectando...";
       button.setAttribute("aria-label", inFlight ? "Confirmando anúncio" : "Preparando anúncio");
+      popupLabel.textContent = inFlight ? "Confirmando oferta..." : "Conectando...";
+      popupButton.setAttribute("aria-label", popupLabel.textContent);
     } else if (count >= DAILY_LIMIT) {
       button.disabled = true;
       button.dataset.state = "limit";
       buttonLabel.textContent = "Volte amanhã";
       button.setAttribute("aria-label", "Limite diário atingido. Volte amanhã.");
+      popupLabel.textContent = "Volte amanhã";
+      popupButton.setAttribute("aria-label", "Limite diário atingido. Volte amanhã.");
     } else if (secondsRemaining()) {
       const seconds = secondsRemaining();
       button.disabled = true;
       button.dataset.state = "cooldown";
       buttonLabel.textContent = `Aguarde ${seconds}s`;
       button.setAttribute("aria-label", `Próximo anúncio disponível em ${seconds} segundos.`);
-    } else if (!readyAttempt || readyAttempt.count !== count) {
+      popupLabel.textContent = `Aguarde ${seconds}s`;
+      popupButton.setAttribute("aria-label", `Próxima oferta disponível em ${seconds} segundos.`);
+    } else if (format === "pop") {
+      button.disabled = true;
+      button.dataset.state = "waiting";
+      buttonLabel.textContent = "Abra a oferta abaixo";
+      button.setAttribute("aria-label", "Nesta etapa, abra a oferta premiada abaixo.");
+      popupButton.disabled = !ready;
+      popupLabel.textContent = ready ? "Abrir oferta premiada" : "Preparando oferta...";
+      popupButton.setAttribute("aria-label", ready ? `Abrir oferta premiada. Etapa ${count + 1} de ${DAILY_LIMIT}.` : "Preparando oferta premiada");
+    } else if (!ready) {
       button.disabled = true;
       button.dataset.state = "loading";
       buttonLabel.textContent = "Preparando...";
       button.setAttribute("aria-label", "Preparando anúncio");
+      const nextPopup = Math.ceil((count + 1) / 3) * 3;
+      popupLabel.textContent = `Oferta na etapa ${nextPopup}`;
+      popupButton.setAttribute("aria-label", `Oferta premiada disponível na etapa ${nextPopup} de ${DAILY_LIMIT}.`);
     } else {
       button.disabled = false;
-      button.dataset.state = format === "pop" ? "pop" : "ready";
-      buttonLabel.textContent = format === "pop" ? "Abrir oferta" : "Assistir vídeo";
-      button.setAttribute("aria-label", `${format === "pop" ? "Abrir oferta em nova aba" : "Assistir vídeo"}. ${count} de ${DAILY_LIMIT} anúncios remunerados elegíveis hoje.`);
+      button.dataset.state = "ready";
+      buttonLabel.textContent = "Assistir vídeo";
+      button.setAttribute("aria-label", `Assistir vídeo. ${count} de ${DAILY_LIMIT} anúncios remunerados elegíveis hoje.`);
+      const nextPopup = Math.ceil((count + 1) / 3) * 3;
+      popupLabel.textContent = `Oferta na etapa ${nextPopup}`;
+      popupButton.setAttribute("aria-label", `Oferta premiada disponível na etapa ${nextPopup} de ${DAILY_LIMIT}.`);
     }
   }
 
@@ -257,7 +281,7 @@
     return preparingAttempt;
   }
 
-  button.addEventListener("click", () => {
+  function openAd(requestedFormat) {
     if (inFlight || !progress || secondsRemaining() || !readyAttempt) return;
     if (progress.completedVideos >= DAILY_LIMIT) { render(); return; }
 
@@ -268,6 +292,7 @@
     }
 
     const { ymid, format } = readyAttempt;
+    if (format !== requestedFormat) return;
     if (format !== nextFormat(progress.completedVideos)) { readyAttempt = null; void ensureAttempt(); return; }
     readyAttempt = null;
     inFlight = true;
@@ -297,7 +322,10 @@
       setTimeout(() => { void refreshProgress().catch(showProgressError); }, 5000);
       void ensureAttempt();
     });
-  });
+  }
+
+  button.addEventListener("click", () => openAd("end"));
+  popupButton.addEventListener("click", () => openAd("pop"));
 
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) {

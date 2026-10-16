@@ -105,7 +105,7 @@ test("bot clears the chat intro description in default and Portuguese", async ()
   assert.deepEqual(cleared, ["default", "pt"]);
 });
 
-test("private /start and /ajuda show the named Mini App and a separate privacy link", async () => {
+test("private /start and /ajuda show the Mini App, rewarded Popup entry, and privacy link", async () => {
   const menus = [];
   await withServer(async (base, sent) => {
     const response = await fetch(`${base}/telegram/webhook`, {
@@ -117,7 +117,9 @@ test("private /start and /ajuda show the named Mini App and a separate privacy l
     assert.equal(sent[0].chat_id, 123);
     assert.equal(sent[0].reply_markup.inline_keyboard[0][0].text, "Mini App - Young Money");
     assert.equal(sent[0].reply_markup.inline_keyboard[0][0].web_app.url, config.webAppUrl);
-    assert.equal(sent[0].reply_markup.inline_keyboard[1][0].url, `${config.webAppUrl}privacy.html`);
+    assert.equal(sent[0].reply_markup.inline_keyboard[1][0].text, "Abrir oferta premiada");
+    assert.equal(sent[0].reply_markup.inline_keyboard[1][0].web_app.url, `${config.webAppUrl}?ad=popup`);
+    assert.equal(sent[0].reply_markup.inline_keyboard[2][0].url, `${config.webAppUrl}privacy.html`);
     assert.match(sent[0].text, /Olá, Ana Silva!/);
     assert.match(sent[0].text, /Mini Apps disponíveis/);
     const help = await fetch(`${base}/telegram/webhook`, {

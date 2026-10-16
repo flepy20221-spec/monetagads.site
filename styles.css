@@ -92,10 +92,10 @@ body {
   position: absolute;
   left: 8.5%;
   right: 8.5%;
-  bottom: 3.5%;
+  bottom: .5%;
   margin: 0;
-  min-height: 5.9%;
-  padding: 8px 12px;
+  min-height: 4.9%;
+  padding: 5px 10px;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -104,11 +104,11 @@ body {
   background: linear-gradient(115deg, rgba(5, 27, 73, .95), rgba(5, 17, 51, .94));
   box-shadow: 0 0 15px rgba(0, 162, 255, .22), inset 0 0 13px rgba(4, 154, 248, .16);
   color: #d8edff;
-  font-size: clamp(10px, 2.8vw, 15px);
+  font-size: clamp(9px, 2.5vw, 13px);
   line-height: 1.35;
   pointer-events: none;
 }
-.account-status svg { width: 23px; height: 23px; flex: 0 0 23px; color: #24c7ff; }
+.account-status svg { width: 18px; height: 18px; flex: 0 0 18px; color: #24c7ff; }
 
 .watch-button {
   position: absolute;
@@ -151,7 +151,7 @@ body {
 .watch-button[data-state="loading"] .button-state,
 .watch-button[data-state="limit"] .button-state,
 .watch-button[data-state="cooldown"] .button-state,
-.watch-button[data-state="pop"] .button-state { display: flex; }
+.watch-button[data-state="waiting"] .button-state { display: flex; }
 
 .button-spinner {
   width: .8em;
@@ -164,17 +164,46 @@ body {
 
 .watch-button[data-state="limit"] .button-spinner,
 .watch-button[data-state="cooldown"] .button-spinner,
-.watch-button[data-state="pop"] .button-spinner { display: none; }
+.watch-button[data-state="waiting"] .button-spinner { display: none; }
 .button-icon { display: none; width: 1.15em; height: 1.15em; }
 .watch-button[data-state="limit"] .button-icon { display: block; }
+.watch-button[data-state="waiting"] .button-state { border-color: #88daff; background: linear-gradient(#68c6ff, #2580da); color: #061c3a; font-size: clamp(17px, 4.9vw, 30px); }
+
+.popup-button {
+  position: absolute;
+  z-index: 2;
+  left: 8.5%;
+  top: 82.3%;
+  width: 83%;
+  height: 5.3%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 5px 10px;
+  border: 2px solid #c788ff;
+  border-radius: 999px;
+  background: linear-gradient(120deg, #662cba, #3d48ab);
+  box-shadow: 0 0 14px rgba(174, 93, 255, .6), inset 0 0 12px rgba(236, 187, 255, .2);
+  color: #fff;
+  font: inherit;
+  font-size: clamp(12px, 3.5vw, 19px);
+  font-weight: 750;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.popup-button svg { width: 1.25em; height: 1.25em; flex: 0 0 auto; }
+.popup-button:disabled { opacity: .7; cursor: default; }
+.popup-button:active:not(:disabled) { transform: scale(.985); }
+.popup-button:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
 
 .withdraw-open {
   position: absolute;
   z-index: 2;
   left: 8.5%;
-  top: 82.6%;
+  top: 88%;
   width: 83%;
-  min-height: 7%;
+  min-height: 5.1%;
   display: flex;
   align-items: center;
   justify-content: space-around;
@@ -393,6 +422,7 @@ body {
   .withdraw-form { padding-inline: 22px; }
   .withdraw-brand { left: -10px; right: -10px; }
   .withdraw-open { padding-inline: 8px; font-size: 11px; }
+  .popup-button { font-size: 12px; }
   .history-stat { gap: 3px; }
   .history-card-main { padding-right: 0; }
   .history-card-status { position: static; grid-column: 2; grid-row: 2; justify-self: start; }

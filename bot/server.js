@@ -34,8 +34,11 @@ function displayName(user) {
 }
 
 function miniAppsMenu(webAppUrl) {
+  const popupUrl = new URL(webAppUrl);
+  popupUrl.searchParams.set("ad", "popup");
   return { inline_keyboard: [
     [{ text: "Mini App - Young Money", web_app: { url: webAppUrl } }],
+    [{ text: "Abrir oferta premiada", web_app: { url: popupUrl.toString() } }],
     [{ text: "Privacidade", url: new URL("privacy.html", webAppUrl).toString() }]
   ] };
 }

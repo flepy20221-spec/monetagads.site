@@ -7,10 +7,10 @@
     <meta name="description" content="Young Money: complete anúncios remunerados e acompanhe sua meta diária." />
     <title>Young Money | Anúncios diários</title>
     <link rel="preload" href="./assets/young-money-space.webp?v=470b58c" as="image" />
-    <link rel="stylesheet" href="./styles.css?v=rewarded-v5" />
+    <link rel="stylesheet" href="./styles.css?v=rewarded-v6" />
     <script src="https://telegram.org/js/telegram-web-app.js" defer></script>
     <script src="https://libtl.com/sdk.js" data-zone="11977205" data-sdk="show_11977205" defer></script>
-    <script src="./app.js?v=rewarded-v5" defer></script>
+    <script src="./app.js?v=rewarded-v6" defer></script>
     <script src="./withdraw.js?v=rewarded-v5" defer></script>
   </head>
   <body>
@@ -64,6 +64,11 @@
           <svg class="button-icon"><use href="#icon-calendar" /></svg>
           <span id="button-state-label">Carregando...</span>
         </span>
+      </button>
+
+      <button id="popup-button" class="popup-button" type="button" disabled aria-label="Preparando oferta premiada">
+        <svg aria-hidden="true"><use href="#icon-send" /></svg>
+        <span id="popup-button-label">Preparando oferta...</span>
       </button>
 
       <button id="withdraw-open" class="withdraw-open" type="button"><svg aria-hidden="true"><use href="#icon-send" /></svg><span>Saque diário · PIX ou FaucetPay</span><svg aria-hidden="true"><use href="#icon-chevron" /></svg></button>
